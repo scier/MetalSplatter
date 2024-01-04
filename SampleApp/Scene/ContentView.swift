@@ -1,6 +1,16 @@
 import SwiftUI
 import RealityKit
 
+#if os(iOS) || os(macOS)
+
+struct ContentView: View {
+    var body: some View {
+        MetalKitSceneView(model: Constants.model)
+    }
+}
+
+#elseif os(visionOS)
+
 struct ContentView: View {
     @State private var showImmersiveSpace = false
     @State private var immersiveSpaceIsShown = false
@@ -37,3 +47,5 @@ struct ContentView: View {
         }
     }
 }
+
+#endif // os(visionOS)

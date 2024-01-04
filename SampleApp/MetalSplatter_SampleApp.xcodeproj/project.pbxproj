@@ -7,85 +7,44 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		61791DCC2B41543C00302B57 /* Assets.xcassets in Sources */ = {isa = PBXBuildFile; fileRef = 61791DC32B41514300302B57 /* Assets.xcassets */; };
+		610347D92B46864500693CE3 /* SampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF62B41551F00302B57 /* SampleApp.swift */; };
+		610347DA2B46874500693CE3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF72B41551F00302B57 /* ContentView.swift */; };
+		610347DB2B46875700693CE3 /* CompositorServicesSceneRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E0C2B41683500302B57 /* CompositorServicesSceneRenderer.swift */; };
+		610347DC2B46875A00693CE3 /* ContentStageConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 610347D82B46861E00693CE3 /* ContentStageConfiguration.swift */; };
 		61791DCF2B41544300302B57 /* Assets.xcassets in Sources */ = {isa = PBXBuildFile; fileRef = 61791DC32B41514300302B57 /* Assets.xcassets */; };
 		61791DE02B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */; };
-		61791DE12B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */; };
 		61791DE22B4154FB00302B57 /* ModelIdentifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDB2B4154FB00302B57 /* ModelIdentifier.swift */; };
-		61791DE32B4154FB00302B57 /* ModelIdentifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDB2B4154FB00302B57 /* ModelIdentifier.swift */; };
 		61791DE42B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDC2B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift */; };
-		61791DE52B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDC2B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift */; };
 		61791DE82B4154FB00302B57 /* ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDE2B4154FB00302B57 /* ModelRenderer.swift */; };
-		61791DE92B4154FB00302B57 /* ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDE2B4154FB00302B57 /* ModelRenderer.swift */; };
 		61791DEA2B4154FB00302B57 /* MatrixMathUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDF2B4154FB00302B57 /* MatrixMathUtil.swift */; };
-		61791DEB2B4154FB00302B57 /* MatrixMathUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDF2B4154FB00302B57 /* MatrixMathUtil.swift */; };
-		61791DF22B41551300302B57 /* SampleApp_iOS_macOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DEE2B41551300302B57 /* SampleApp_iOS_macOS.swift */; };
-		61791DF32B41551300302B57 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DEF2B41551300302B57 /* ContentView.swift */; };
-		61791DFA2B41551F00302B57 /* SampleApp_visionOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF62B41551F00302B57 /* SampleApp_visionOS.swift */; };
-		61791DFB2B41551F00302B57 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF72B41551F00302B57 /* ContentView.swift */; };
 		61791E002B415D3F00302B57 /* MetalSplatter in Frameworks */ = {isa = PBXBuildFile; productRef = 61791DFF2B415D3F00302B57 /* MetalSplatter */; };
 		61791E022B415D3F00302B57 /* SampleBoxRenderer in Frameworks */ = {isa = PBXBuildFile; productRef = 61791E012B415D3F00302B57 /* SampleBoxRenderer */; };
-		61791E062B415F2600302B57 /* MetalSplatter in Frameworks */ = {isa = PBXBuildFile; productRef = 61791E052B415F2600302B57 /* MetalSplatter */; };
-		61791E082B415F2600302B57 /* SampleBoxRenderer in Frameworks */ = {isa = PBXBuildFile; productRef = 61791E072B415F2600302B57 /* SampleBoxRenderer */; };
-		61791E0D2B41683600302B57 /* CompositorServicesSceneRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E0C2B41683500302B57 /* CompositorServicesSceneRenderer.swift */; };
 		61791E102B41688000302B57 /* MetalKitSceneRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E0E2B41685800302B57 /* MetalKitSceneRenderer.swift */; };
-		61791E122B416DCF00302B57 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E112B416DCF00302B57 /* Constants.swift */; };
 		61791E132B416DD700302B57 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E112B416DCF00302B57 /* Constants.swift */; };
-		61791E162B42297B00302B57 /* SceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E142B42294700302B57 /* SceneView.swift */; };
-		61791E1D2B422A4900302B57 /* ModelIdentifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDB2B4154FB00302B57 /* ModelIdentifier.swift */; };
-		61791E1E2B422A4900302B57 /* SampleBoxRenderer+ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDC2B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift */; };
-		61791E1F2B422A4900302B57 /* MatrixMathUtil.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDF2B4154FB00302B57 /* MatrixMathUtil.swift */; };
-		61791E202B422A4900302B57 /* MetalKitSceneRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E0E2B41685800302B57 /* MetalKitSceneRenderer.swift */; };
-		61791E222B422A4900302B57 /* SplatRenderer+ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */; };
-		61791E232B422A4900302B57 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DEF2B41551300302B57 /* ContentView.swift */; };
-		61791E242B422A4900302B57 /* ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDE2B4154FB00302B57 /* ModelRenderer.swift */; };
-		61791E252B422A4900302B57 /* Assets.xcassets in Sources */ = {isa = PBXBuildFile; fileRef = 61791DC32B41514300302B57 /* Assets.xcassets */; };
-		61791E262B422A4900302B57 /* SampleApp_iOS_macOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DEE2B41551300302B57 /* SampleApp_iOS_macOS.swift */; };
-		61791E272B422A4900302B57 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E112B416DCF00302B57 /* Constants.swift */; };
-		61791E282B422A4900302B57 /* SceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E142B42294700302B57 /* SceneView.swift */; };
-		61791E2A2B422A4900302B57 /* SplatIO in Frameworks */ = {isa = PBXBuildFile; productRef = 61791E192B422A4900302B57 /* SplatIO */; };
-		61791E2B2B422A4900302B57 /* PLYIO in Frameworks */ = {isa = PBXBuildFile; productRef = 61791E182B422A4900302B57 /* PLYIO */; };
-		61791E2C2B422A4900302B57 /* MetalSplatter in Frameworks */ = {isa = PBXBuildFile; productRef = 61791E1A2B422A4900302B57 /* MetalSplatter */; };
-		61791E2D2B422A4900302B57 /* SampleBoxRenderer in Frameworks */ = {isa = PBXBuildFile; productRef = 61791E1B2B422A4900302B57 /* SampleBoxRenderer */; };
+		61791E162B42297B00302B57 /* MetalKitSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E142B42294700302B57 /* MetalKitSceneView.swift */; };
 		617E50C92B314C4800F99766 /* PLYIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50C82B314C4800F99766 /* PLYIO */; };
 		617E50CB2B314C4800F99766 /* SplatIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50CA2B314C4800F99766 /* SplatIO */; };
-		6198326A2AF0BC390022500D /* PLYIO in Frameworks */ = {isa = PBXBuildFile; productRef = 619832692AF0BC390022500D /* PLYIO */; };
-		6198326D2AF6DCAC0022500D /* SplatIO in Frameworks */ = {isa = PBXBuildFile; productRef = 6198326C2AF6DCAC0022500D /* SplatIO */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		610347D82B46861E00693CE3 /* ContentStageConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentStageConfiguration.swift; sourceTree = "<group>"; };
 		61791DC32B41514300302B57 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "SplatRenderer+ModelRenderer.swift"; sourceTree = "<group>"; };
 		61791DDB2B4154FB00302B57 /* ModelIdentifier.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ModelIdentifier.swift; sourceTree = "<group>"; };
 		61791DDC2B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "SampleBoxRenderer+ModelRenderer.swift"; sourceTree = "<group>"; };
 		61791DDE2B4154FB00302B57 /* ModelRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ModelRenderer.swift; sourceTree = "<group>"; };
 		61791DDF2B4154FB00302B57 /* MatrixMathUtil.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MatrixMathUtil.swift; sourceTree = "<group>"; };
-		61791DEE2B41551300302B57 /* SampleApp_iOS_macOS.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SampleApp_iOS_macOS.swift; sourceTree = "<group>"; };
-		61791DEF2B41551300302B57 /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		61791DF62B41551F00302B57 /* SampleApp_visionOS.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SampleApp_visionOS.swift; sourceTree = "<group>"; };
+		61791DF62B41551F00302B57 /* SampleApp.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SampleApp.swift; sourceTree = "<group>"; };
 		61791DF72B41551F00302B57 /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		61791DF82B41551F00302B57 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		61791E0C2B41683500302B57 /* CompositorServicesSceneRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CompositorServicesSceneRenderer.swift; sourceTree = "<group>"; };
 		61791E0E2B41685800302B57 /* MetalKitSceneRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneRenderer.swift; sourceTree = "<group>"; };
 		61791E112B416DCF00302B57 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
-		61791E142B42294700302B57 /* SceneView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SceneView.swift; sourceTree = "<group>"; };
-		61791E322B422A4900302B57 /* MetalSplatter SampleApp macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MetalSplatter SampleApp macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		617E50B02B314BE200F99766 /* MetalSplatter SampleApp iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MetalSplatter SampleApp iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		61E3FD822AE5CB0200032652 /* MetalSplatter SampleApp visionOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MetalSplatter SampleApp visionOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		61791E142B42294700302B57 /* MetalKitSceneView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneView.swift; sourceTree = "<group>"; };
+		617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MetalSplatter SampleApp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		61791E292B422A4900302B57 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				61791E2A2B422A4900302B57 /* SplatIO in Frameworks */,
-				61791E2B2B422A4900302B57 /* PLYIO in Frameworks */,
-				61791E2C2B422A4900302B57 /* MetalSplatter in Frameworks */,
-				61791E2D2B422A4900302B57 /* SampleBoxRenderer in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		617E50AD2B314BE200F99766 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -97,52 +56,47 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		61E3FD7F2AE5CB0200032652 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				6198326D2AF6DCAC0022500D /* SplatIO in Frameworks */,
-				6198326A2AF0BC390022500D /* PLYIO in Frameworks */,
-				61791E062B415F2600302B57 /* MetalSplatter in Frameworks */,
-				61791E082B415F2600302B57 /* SampleBoxRenderer in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		61791DD92B4154FB00302B57 /* Shared */ = {
+		610347DF2B4689DB00693CE3 /* Model */ = {
 			isa = PBXGroup;
 			children = (
-				61791DDF2B4154FB00302B57 /* MatrixMathUtil.swift */,
 				61791DDB2B4154FB00302B57 /* ModelIdentifier.swift */,
 				61791DDE2B4154FB00302B57 /* ModelRenderer.swift */,
 				61791DDC2B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift */,
 				61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */,
 			);
-			path = Shared;
+			path = Model;
 			sourceTree = "<group>";
 		};
-		61791DEC2B41551300302B57 /* iOS_macOS */ = {
+		610347E02B468A0000693CE3 /* Scene */ = {
 			isa = PBXGroup;
 			children = (
-				61791DEF2B41551300302B57 /* ContentView.swift */,
-				61791DEE2B41551300302B57 /* SampleApp_iOS_macOS.swift */,
-				61791E142B42294700302B57 /* SceneView.swift */,
-				61791E0E2B41685800302B57 /* MetalKitSceneRenderer.swift */,
-			);
-			path = iOS_macOS;
-			sourceTree = "<group>";
-		};
-		61791DF52B41551F00302B57 /* visionOS */ = {
-			isa = PBXGroup;
-			children = (
-				61791DF82B41551F00302B57 /* Info.plist */,
-				61791DF72B41551F00302B57 /* ContentView.swift */,
-				61791DF62B41551F00302B57 /* SampleApp_visionOS.swift */,
 				61791E0C2B41683500302B57 /* CompositorServicesSceneRenderer.swift */,
+				610347D82B46861E00693CE3 /* ContentStageConfiguration.swift */,
+				61791DF72B41551F00302B57 /* ContentView.swift */,
+				61791E0E2B41685800302B57 /* MetalKitSceneRenderer.swift */,
+				61791E142B42294700302B57 /* MetalKitSceneView.swift */,
 			);
-			path = visionOS;
+			path = Scene;
+			sourceTree = "<group>";
+		};
+		610347E12B468A0B00693CE3 /* Util */ = {
+			isa = PBXGroup;
+			children = (
+				61791DDF2B4154FB00302B57 /* MatrixMathUtil.swift */,
+			);
+			path = Util;
+			sourceTree = "<group>";
+		};
+		610347E22B468A1100693CE3 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				61791E112B416DCF00302B57 /* Constants.swift */,
+				61791DF62B41551F00302B57 /* SampleApp.swift */,
+			);
+			path = App;
 			sourceTree = "<group>";
 		};
 		619832682AF0BC390022500D /* Frameworks */ = {
@@ -155,10 +109,11 @@
 		61E3FD792AE5CB0200032652 = {
 			isa = PBXGroup;
 			children = (
-				61791E112B416DCF00302B57 /* Constants.swift */,
-				61791DD92B4154FB00302B57 /* Shared */,
-				61791DEC2B41551300302B57 /* iOS_macOS */,
-				61791DF52B41551F00302B57 /* visionOS */,
+				610347E22B468A1100693CE3 /* App */,
+				610347E12B468A0B00693CE3 /* Util */,
+				610347E02B468A0000693CE3 /* Scene */,
+				610347DF2B4689DB00693CE3 /* Model */,
+				61791DF82B41551F00302B57 /* Info.plist */,
 				61791DC32B41514300302B57 /* Assets.xcassets */,
 				61E3FD832AE5CB0200032652 /* Products */,
 				619832682AF0BC390022500D /* Frameworks */,
@@ -168,9 +123,7 @@
 		61E3FD832AE5CB0200032652 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				61E3FD822AE5CB0200032652 /* MetalSplatter SampleApp visionOS.app */,
-				617E50B02B314BE200F99766 /* MetalSplatter SampleApp iOS.app */,
-				61791E322B422A4900302B57 /* MetalSplatter SampleApp macOS.app */,
+				617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -178,32 +131,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		61791E172B422A4900302B57 /* MetalSplatter SampleApp macOS */ = {
+		617E50AF2B314BE200F99766 /* MetalSplatter SampleApp */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 61791E2F2B422A4900302B57 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp macOS" */;
-			buildPhases = (
-				61791E1C2B422A4900302B57 /* Sources */,
-				61791E292B422A4900302B57 /* Frameworks */,
-				61791E2E2B422A4900302B57 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = "MetalSplatter SampleApp macOS";
-			packageProductDependencies = (
-				61791E182B422A4900302B57 /* PLYIO */,
-				61791E192B422A4900302B57 /* SplatIO */,
-				61791E1A2B422A4900302B57 /* MetalSplatter */,
-				61791E1B2B422A4900302B57 /* SampleBoxRenderer */,
-			);
-			productName = "MetalSplatter SampleApp";
-			productReference = 61791E322B422A4900302B57 /* MetalSplatter SampleApp macOS.app */;
-			productType = "com.apple.product-type.application";
-		};
-		617E50AF2B314BE200F99766 /* MetalSplatter SampleApp iOS */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 617E50C12B314BE300F99766 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp iOS" */;
+			buildConfigurationList = 617E50C12B314BE300F99766 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp" */;
 			buildPhases = (
 				617E50AC2B314BE200F99766 /* Sources */,
 				617E50AD2B314BE200F99766 /* Frameworks */,
@@ -213,7 +143,7 @@
 			);
 			dependencies = (
 			);
-			name = "MetalSplatter SampleApp iOS";
+			name = "MetalSplatter SampleApp";
 			packageProductDependencies = (
 				617E50C82B314C4800F99766 /* PLYIO */,
 				617E50CA2B314C4800F99766 /* SplatIO */,
@@ -221,30 +151,7 @@
 				61791E012B415D3F00302B57 /* SampleBoxRenderer */,
 			);
 			productName = "MetalSplatter SampleApp";
-			productReference = 617E50B02B314BE200F99766 /* MetalSplatter SampleApp iOS.app */;
-			productType = "com.apple.product-type.application";
-		};
-		61E3FD812AE5CB0200032652 /* MetalSplatter SampleApp visionOS */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 61E3FD9A2AE5CB0300032652 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp visionOS" */;
-			buildPhases = (
-				61E3FD7E2AE5CB0200032652 /* Sources */,
-				61E3FD7F2AE5CB0200032652 /* Frameworks */,
-				61E3FD802AE5CB0200032652 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = "MetalSplatter SampleApp visionOS";
-			packageProductDependencies = (
-				619832692AF0BC390022500D /* PLYIO */,
-				6198326C2AF6DCAC0022500D /* SplatIO */,
-				61791E052B415F2600302B57 /* MetalSplatter */,
-				61791E072B415F2600302B57 /* SampleBoxRenderer */,
-			);
-			productName = "MetalSplatter SampleApp";
-			productReference = 61E3FD822AE5CB0200032652 /* MetalSplatter SampleApp visionOS.app */;
+			productReference = 617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -259,9 +166,6 @@
 				TargetAttributes = {
 					617E50AF2B314BE200F99766 = {
 						CreatedOnToolsVersion = 15.2;
-					};
-					61E3FD812AE5CB0200032652 = {
-						CreatedOnToolsVersion = 15.1;
 					};
 				};
 			};
@@ -281,29 +185,13 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				617E50AF2B314BE200F99766 /* MetalSplatter SampleApp iOS */,
-				61791E172B422A4900302B57 /* MetalSplatter SampleApp macOS */,
-				61E3FD812AE5CB0200032652 /* MetalSplatter SampleApp visionOS */,
+				617E50AF2B314BE200F99766 /* MetalSplatter SampleApp */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		61791E2E2B422A4900302B57 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		617E50AE2B314BE200F99766 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		61E3FD802AE5CB0200032652 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -313,128 +201,29 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		61791E1C2B422A4900302B57 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				61791E1D2B422A4900302B57 /* ModelIdentifier.swift in Sources */,
-				61791E1E2B422A4900302B57 /* SampleBoxRenderer+ModelRenderer.swift in Sources */,
-				61791E1F2B422A4900302B57 /* MatrixMathUtil.swift in Sources */,
-				61791E202B422A4900302B57 /* MetalKitSceneRenderer.swift in Sources */,
-				61791E222B422A4900302B57 /* SplatRenderer+ModelRenderer.swift in Sources */,
-				61791E232B422A4900302B57 /* ContentView.swift in Sources */,
-				61791E242B422A4900302B57 /* ModelRenderer.swift in Sources */,
-				61791E252B422A4900302B57 /* Assets.xcassets in Sources */,
-				61791E262B422A4900302B57 /* SampleApp_iOS_macOS.swift in Sources */,
-				61791E272B422A4900302B57 /* Constants.swift in Sources */,
-				61791E282B422A4900302B57 /* SceneView.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		617E50AC2B314BE200F99766 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				61791DE22B4154FB00302B57 /* ModelIdentifier.swift in Sources */,
+				610347DA2B46874500693CE3 /* ContentView.swift in Sources */,
 				61791DE42B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift in Sources */,
 				61791DEA2B4154FB00302B57 /* MatrixMathUtil.swift in Sources */,
+				610347DB2B46875700693CE3 /* CompositorServicesSceneRenderer.swift in Sources */,
+				610347D92B46864500693CE3 /* SampleApp.swift in Sources */,
 				61791E102B41688000302B57 /* MetalKitSceneRenderer.swift in Sources */,
 				61791DE02B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift in Sources */,
-				61791DF32B41551300302B57 /* ContentView.swift in Sources */,
 				61791DE82B4154FB00302B57 /* ModelRenderer.swift in Sources */,
 				61791DCF2B41544300302B57 /* Assets.xcassets in Sources */,
-				61791DF22B41551300302B57 /* SampleApp_iOS_macOS.swift in Sources */,
 				61791E132B416DD700302B57 /* Constants.swift in Sources */,
-				61791E162B42297B00302B57 /* SceneView.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		61E3FD7E2AE5CB0200032652 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				61791DE32B4154FB00302B57 /* ModelIdentifier.swift in Sources */,
-				61791E122B416DCF00302B57 /* Constants.swift in Sources */,
-				61791DE52B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift in Sources */,
-				61791DEB2B4154FB00302B57 /* MatrixMathUtil.swift in Sources */,
-				61791E0D2B41683600302B57 /* CompositorServicesSceneRenderer.swift in Sources */,
-				61791DE12B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift in Sources */,
-				61791DFB2B41551F00302B57 /* ContentView.swift in Sources */,
-				61791DE92B4154FB00302B57 /* ModelRenderer.swift in Sources */,
-				61791DCC2B41543C00302B57 /* Assets.xcassets in Sources */,
-				61791DFA2B41551F00302B57 /* SampleApp_visionOS.swift in Sources */,
+				61791E162B42297B00302B57 /* MetalKitSceneView.swift in Sources */,
+				610347DC2B46875A00693CE3 /* ContentStageConfiguration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		61791E302B422A4900302B57 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "";
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arkit metal";
-				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UIStatusBarHidden = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 14.2;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
-				SUPPORTED_PLATFORMS = macosx;
-				SUPPORTS_MACCATALYST = NO;
-				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		61791E312B422A4900302B57 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "";
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arkit metal";
-				INFOPLIST_KEY_UIRequiresFullScreen = YES;
-				INFOPLIST_KEY_UIStatusBarHidden = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 14.2;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
-				SUPPORTED_PLATFORMS = macosx;
-				SUPPORTS_MACCATALYST = NO;
-				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "";
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
 		617E50C22B314BE300F99766 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -443,6 +232,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arkit metal";
@@ -457,14 +247,14 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = "1,2,7";
 			};
 			name = Debug;
 		};
@@ -476,6 +266,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arkit metal";
@@ -490,14 +281,14 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = "1,2,7";
 			};
 			name = Release;
 		};
@@ -618,67 +409,10 @@
 			};
 			name = Release;
 		};
-		61E3FD9B2AE5CB0300032652 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = visionOS/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "xros xrsimulator";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-			};
-			name = Debug;
-		};
-		61E3FD9C2AE5CB0300032652 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = visionOS/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "xros xrsimulator";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		61791E2F2B422A4900302B57 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp macOS" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				61791E302B422A4900302B57 /* Debug */,
-				61791E312B422A4900302B57 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		617E50C12B314BE300F99766 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp iOS" */ = {
+		617E50C12B314BE300F99766 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				617E50C22B314BE300F99766 /* Debug */,
@@ -692,15 +426,6 @@
 			buildConfigurations = (
 				61E3FD982AE5CB0300032652 /* Debug */,
 				61E3FD992AE5CB0300032652 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		61E3FD9A2AE5CB0300032652 /* Build configuration list for PBXNativeTarget "MetalSplatter SampleApp visionOS" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				61E3FD9B2AE5CB0300032652 /* Debug */,
-				61E3FD9C2AE5CB0300032652 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -723,43 +448,11 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = SampleBoxRenderer;
 		};
-		61791E052B415F2600302B57 /* MetalSplatter */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = MetalSplatter;
-		};
-		61791E072B415F2600302B57 /* SampleBoxRenderer */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = SampleBoxRenderer;
-		};
-		61791E182B422A4900302B57 /* PLYIO */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = PLYIO;
-		};
-		61791E192B422A4900302B57 /* SplatIO */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = SplatIO;
-		};
-		61791E1A2B422A4900302B57 /* MetalSplatter */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = MetalSplatter;
-		};
-		61791E1B2B422A4900302B57 /* SampleBoxRenderer */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = SampleBoxRenderer;
-		};
 		617E50C82B314C4800F99766 /* PLYIO */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PLYIO;
 		};
 		617E50CA2B314C4800F99766 /* SplatIO */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = SplatIO;
-		};
-		619832692AF0BC390022500D /* PLYIO */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = PLYIO;
-		};
-		6198326C2AF6DCAC0022500D /* SplatIO */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SplatIO;
 		};

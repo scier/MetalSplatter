@@ -1,3 +1,5 @@
+#if os(iOS) || os(macOS)
+
 import Metal
 import MetalKit
 import MetalSplatter
@@ -126,3 +128,5 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         drawableSize = size
     }
 }
+
+#endif // os(iOS) || os(macOS)

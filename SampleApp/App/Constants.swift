@@ -4,7 +4,7 @@ import SwiftUI
 enum Constants {
     // For testing, try setting model = .sampleBox
     static let model: ModelIdentifier =
-        .gaussianSplat(URL(filePath: "PATH/TO/PLY"))
+        .gaussianSplat("PATH/TO/PLY")
 
     static let maxSimultaneousRenders = 3
     static let rotationPerSecond = Angle(degrees: 7)

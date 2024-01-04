@@ -14,9 +14,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "61791E172B422A4900302B57"
-               BuildableName = "MetalSplatter SampleApp macOS.app"
-               BlueprintName = "MetalSplatter SampleApp macOS"
+               BlueprintIdentifier = "617E50AF2B314BE200F99766"
+               BuildableName = "MetalSplatter SampleApp.app"
+               BlueprintName = "MetalSplatter SampleApp"
                ReferencedContainer = "container:MetalSplatter_SampleApp.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -43,9 +43,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "61791E172B422A4900302B57"
-            BuildableName = "MetalSplatter SampleApp macOS.app"
-            BlueprintName = "MetalSplatter SampleApp macOS"
+            BlueprintIdentifier = "617E50AF2B314BE200F99766"
+            BuildableName = "MetalSplatter SampleApp.app"
+            BlueprintName = "MetalSplatter SampleApp"
             ReferencedContainer = "container:MetalSplatter_SampleApp.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -60,9 +60,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "61791E172B422A4900302B57"
-            BuildableName = "MetalSplatter SampleApp macOS.app"
-            BlueprintName = "MetalSplatter SampleApp macOS"
+            BlueprintIdentifier = "617E50AF2B314BE200F99766"
+            BuildableName = "MetalSplatter SampleApp.app"
+            BlueprintName = "MetalSplatter SampleApp"
             ReferencedContainer = "container:MetalSplatter_SampleApp.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

@@ -1,3 +1,5 @@
+#if os(visionOS)
+
 import CompositorServices
 import Metal
 import MetalSplatter
@@ -211,3 +213,6 @@ class CompositorServicesSceneRenderer {
         }
     }
 }
+
+#endif // os(visionOS)
+

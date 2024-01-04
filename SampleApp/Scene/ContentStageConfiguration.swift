@@ -1,5 +1,8 @@
-import SwiftUI
+#if os(visionOS)
+
 import CompositorServices
+import Foundation
+import SwiftUI
 
 struct ContentStageConfiguration: CompositorLayerConfiguration {
     func makeConfiguration(capabilities: LayerRenderer.Capabilities, configuration: inout LayerRenderer.Configuration) {
@@ -16,21 +19,4 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
     }
 }
 
-@main
-struct SampleApp_visionOS: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-
-        ImmersiveSpace(for: ModelIdentifier.self) { modelIdentifier in
-            CompositorLayer(configuration: ContentStageConfiguration()) { layerRenderer in
-                let renderer = CompositorServicesSceneRenderer(layerRenderer)
-                renderer.load(modelIdentifier.wrappedValue)
-                renderer.startRenderLoop()
-            }
-        }
-        .immersionStyle(selection: .constant(.full), in: .full)
-    }
-}
-
+#endif // os(visionOS)
