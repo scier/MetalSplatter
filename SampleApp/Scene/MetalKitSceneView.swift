@@ -10,7 +10,7 @@ private typealias ViewRepresentable = UIViewRepresentable
 #endif
 
 struct MetalKitSceneView: ViewRepresentable {
-    var model: ModelIdentifier?
+    var modelIdentifier: ModelIdentifier?
 
     class Coordinator {
         var renderer: MetalKitSceneRenderer?
@@ -41,7 +41,7 @@ struct MetalKitSceneView: ViewRepresentable {
         coordinator.renderer = renderer
         metalKitView.delegate = renderer
 
-        renderer?.load(model)
+        renderer?.load(modelIdentifier)
 
         return metalKitView
     }
@@ -57,7 +57,7 @@ struct MetalKitSceneView: ViewRepresentable {
 #endif
 
     private func updateView(_ coordinator: Coordinator) {
-        coordinator.renderer?.load(model)
+        coordinator.renderer?.load(modelIdentifier)
     }
 }
 

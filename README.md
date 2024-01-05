@@ -1,7 +1,7 @@
 # MetalSplatter
-Render Gaussian Splats using Metal on Apple platforms (iOS/iPhone/iPad, macOS, and visionOS)
+Render Gaussian Splats using Metal on Apple platforms (iOS/iPhone/iPad, macOS, and visionOS/Vision Pro)
 
-This is a Swift/Metal library for rendering scenes captured via the techniques described in [3D Gaussian Splatting for Real-Time Radiance Field Rendering](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/). It will let you load up a PLY and visualize it on iOS anc macOS as well as the visionOS simulator (using vertex amplification for stereo). Modules include
+This is a Swift/Metal library for rendering scenes captured via the techniques described in [3D Gaussian Splatting for Real-Time Radiance Field Rendering](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/). It will let you load up a PLY and visualize it on iOS anc macOS as well as the visionOS simulator (using amplification for rendering in stereo on Vision Pro). Modules include
 * MetalSplatter, the core library to render a frame
 * PLYIO, for reading binary or ASCII PLY files (not writing yet, despite the name); this is standalone, feel free to use it if you just have a hankering to load up some PLY files for some reason.
 * SplatIO, a thin layer on top of PLYIO to interpret these PLY files as sets of splats
@@ -16,7 +16,7 @@ it. Just don't expect it to be stable, or particularly robust.
 
 ### TODO / general shortcomings
 
-* A model viewer app, which lets you read your own PLY and move the camera interactively (and set up a correct local coordinate system and save camera positions so things aren't upside down and at wonky angles all the time)
+* A model viewer app, which lets you move the camera interactively (and set up a correct local coordinate system and save camera positions so things aren't upside down and at wonky angles all the time)
 * Fix colors, which currently aren't quite correct
 * Reduce precision to improve memory usage
 * Precompute the covariance matrix, to slightly reduce memory usage and time spent in the vertex shader
@@ -29,12 +29,11 @@ it. Just don't expect it to be stable, or particularly robust.
 
 You're right, the documentation is entirely missing. I mean, it's kinda embarrasing. Still, this was for fun and I'm gonna get to it eventually, after some of the higher-priority TODO items above. In the meantime, feel free to try out the sample app -- just, like I said, don't expect much.
 
-1. Get yourself a gaussian splat PLY file. Maybe download the [scene data from the oroginal paper](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) -- or better, train your own! This is left as an exercise to the reader.
+1. Get yourself a gaussian splat PLY file. Maybe download the [scene data from the oroginal paper](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) -- or better, train your own! This is left as an exercise to the reader. Once you have it, put it on the device (or simulator) you're going to use
 2. Clone the repo and open SampleApp/MetalSplatter_SampleApp.xcodeproj
 3. If you want to run on iOS/visionOS, select your target and set your development team and bundle ID in Signing & Capabilities. On macOS, just have at it.
-4. Set your scheme to Release mode. It'll run in Debug, but loading the large PLY files is more than an order of magnitude slower.
-5. Edit Constants.swift and change the URL to a path to your local file (I TOLD YOU THIS WAS PRIMITIVE)
-6. Run it
+4. Set your scheme to Release mode. Loading large PLY files is in Debug more than an order of magnitude slower.
+5. Run it
 
 ## Acknowledgements
 

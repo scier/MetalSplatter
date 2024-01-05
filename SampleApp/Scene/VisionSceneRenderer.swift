@@ -16,7 +16,7 @@ extension LayerRenderer.Clock.Instant.Duration {
     }
 }
 
-class CompositorServicesSceneRenderer {
+class VisionSceneRenderer {
     private static let log =
         Logger(subsystem: Bundle.main.bundleIdentifier!,
                category: "CompsitorServicesSceneRenderer")

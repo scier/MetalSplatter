@@ -9,7 +9,7 @@
 /* Begin PBXBuildFile section */
 		610347D92B46864500693CE3 /* SampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF62B41551F00302B57 /* SampleApp.swift */; };
 		610347DA2B46874500693CE3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF72B41551F00302B57 /* ContentView.swift */; };
-		610347DB2B46875700693CE3 /* CompositorServicesSceneRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E0C2B41683500302B57 /* CompositorServicesSceneRenderer.swift */; };
+		610347DB2B46875700693CE3 /* VisionSceneRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E0C2B41683500302B57 /* VisionSceneRenderer.swift */; };
 		610347DC2B46875A00693CE3 /* ContentStageConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 610347D82B46861E00693CE3 /* ContentStageConfiguration.swift */; };
 		61791DCF2B41544300302B57 /* Assets.xcassets in Sources */ = {isa = PBXBuildFile; fileRef = 61791DC32B41514300302B57 /* Assets.xcassets */; };
 		61791DE02B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */; };
@@ -37,7 +37,7 @@
 		61791DF62B41551F00302B57 /* SampleApp.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SampleApp.swift; sourceTree = "<group>"; };
 		61791DF72B41551F00302B57 /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		61791DF82B41551F00302B57 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		61791E0C2B41683500302B57 /* CompositorServicesSceneRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CompositorServicesSceneRenderer.swift; sourceTree = "<group>"; };
+		61791E0C2B41683500302B57 /* VisionSceneRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VisionSceneRenderer.swift; sourceTree = "<group>"; };
 		61791E0E2B41685800302B57 /* MetalKitSceneRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneRenderer.swift; sourceTree = "<group>"; };
 		61791E112B416DCF00302B57 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		61791E142B42294700302B57 /* MetalKitSceneView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneView.swift; sourceTree = "<group>"; };
@@ -73,11 +73,11 @@
 		610347E02B468A0000693CE3 /* Scene */ = {
 			isa = PBXGroup;
 			children = (
-				61791E0C2B41683500302B57 /* CompositorServicesSceneRenderer.swift */,
 				610347D82B46861E00693CE3 /* ContentStageConfiguration.swift */,
 				61791DF72B41551F00302B57 /* ContentView.swift */,
 				61791E0E2B41685800302B57 /* MetalKitSceneRenderer.swift */,
 				61791E142B42294700302B57 /* MetalKitSceneView.swift */,
+				61791E0C2B41683500302B57 /* VisionSceneRenderer.swift */,
 			);
 			path = Scene;
 			sourceTree = "<group>";
@@ -209,7 +209,7 @@
 				610347DA2B46874500693CE3 /* ContentView.swift in Sources */,
 				61791DE42B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift in Sources */,
 				61791DEA2B4154FB00302B57 /* MatrixMathUtil.swift in Sources */,
-				610347DB2B46875700693CE3 /* CompositorServicesSceneRenderer.swift in Sources */,
+				610347DB2B46875700693CE3 /* VisionSceneRenderer.swift in Sources */,
 				610347D92B46864500693CE3 /* SampleApp.swift in Sources */,
 				61791E102B41688000302B57 /* MetalKitSceneRenderer.swift in Sources */,
 				61791DE02B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift in Sources */,
@@ -235,6 +235,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arkit metal";
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
@@ -269,6 +270,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arkit metal";
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
