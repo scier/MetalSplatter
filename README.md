@@ -16,7 +16,7 @@ it. Just don't expect it to be stable, or particularly robust.
 
 ### TODO / general shortcomings
 
-* A model viewer app, which lets you move the camera interactively (and set up a correct local coordinate system and save camera positions so things aren't upside down and at wonky angles all the time)
+* A model viewer app, which lets you move the camera interactively (and set up a correct local coordinate system and save camera positions)
 * Fix colors, which currently aren't quite correct
 * Reduce precision to improve memory usage
 * Precompute the covariance matrix, to slightly reduce memory usage and time spent in the vertex shader
