@@ -110,25 +110,25 @@ private struct PointElementMapping {
         case point = "vertex"
     }
 
-    enum PropertyName: String {
-        case positionX = "x"
-        case positionY = "y"
-        case positionZ = "z"
-        case normalX = "nx"
-        case normalY = "ny"
-        case normalZ = "nz"
-        case colorR = "f_dc_0"
-        case colorG = "f_dc_1"
-        case colorB = "f_dc_2"
-        case sphericalHarmonicsPrefix = "f_rest_"
-        case scaleX = "scale_0"
-        case scaleY = "scale_1"
-        case scaleZ = "scale_2"
-        case opacity = "opacity"
-        case rotationI = "rot_0"
-        case rotationJ = "rot_1"
-        case rotationK = "rot_2"
-        case rotationW = "rot_3"
+    enum PropertyName {
+        static let positionX = [ "x" ]
+        static let positionY = [ "y" ]
+        static let positionZ = [ "z" ]
+        static let normalX = [ "nx", "nxx" ]
+        static let normalY = [ "ny" ]
+        static let normalZ = [ "nz" ]
+        static let colorR = [ "f_dc_0" ]
+        static let colorG = [ "f_dc_1" ]
+        static let colorB = [ "f_dc_2" ]
+        static let sphericalHarmonicsPrefix = "f_rest_"
+        static let scaleX = [ "scale_0" ]
+        static let scaleY = [ "scale_1" ]
+        static let scaleZ = [ "scale_2" ]
+        static let opacity = [ "opacity" ]
+        static let rotationI = [ "rot_0" ]
+        static let rotationJ = [ "rot_1" ]
+        static let rotationK = [ "rot_2" ]
+        static let rotationW = [ "rot_3" ]
     }
 
     static let sphericalHarmonicsCount = 45
@@ -160,32 +160,32 @@ private struct PointElementMapping {
         }
         let headerElement = header.elements[elementTypeIndex]
 
-        let positionXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionX.rawValue)
-        let positionYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionY.rawValue)
-        let positionZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionZ.rawValue)
-        let normalXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalX.rawValue)
-        let normalYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalX.rawValue)
-        let normalZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalX.rawValue)
-        let colorRPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.colorR.rawValue)
-        let colorGPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.colorG.rawValue)
-        let colorBPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.colorB.rawValue)
+        let positionXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionX)
+        let positionYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionY)
+        let positionZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionZ)
+        let normalXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalX)
+        let normalYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalY)
+        let normalZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalZ)
+        let colorRPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.colorR)
+        let colorGPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.colorG)
+        let colorBPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.colorB)
 
         let sphericalHarmonicsPropertyIndices: [Int]
-        if headerElement.hasProperty(forName: "\(PropertyName.sphericalHarmonicsPrefix.rawValue)0") {
-            sphericalHarmonicsPropertyIndices = try (0..<sphericalHarmonicsCount).map { try headerElement.index(forFloat32PropertyNamed: "\(PropertyName.sphericalHarmonicsPrefix.rawValue)\($0)") }
+        if headerElement.hasProperty(forName: "\(PropertyName.sphericalHarmonicsPrefix)0") {
+            sphericalHarmonicsPropertyIndices = try (0..<sphericalHarmonicsCount).map { try headerElement.index(forFloat32PropertyNamed: [ "\(PropertyName.sphericalHarmonicsPrefix)\($0)" ]) }
         } else {
             sphericalHarmonicsPropertyIndices = []
         }
 
-        let scaleXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleX.rawValue)
-        let scaleYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleY.rawValue)
-        let scaleZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleZ.rawValue)
-        let opacityPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.opacity.rawValue)
+        let scaleXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleX)
+        let scaleYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleY)
+        let scaleZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleZ)
+        let opacityPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.opacity)
 
-        let rotationIPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationI.rawValue)
-        let rotationJPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationJ.rawValue)
-        let rotationKPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationK.rawValue)
-        let rotationWPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationW.rawValue)
+        let rotationIPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationI)
+        let rotationJPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationJ)
+        let rotationKPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationK)
+        let rotationWPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationW)
 
         return PointElementMapping(elementTypeIndex: elementTypeIndex,
                                    positionXPropertyIndex: positionXPropertyIndex,
@@ -244,10 +244,14 @@ private extension PLYHeader.Element {
         index(forPropertyNamed: name) != nil
     }
 
-    func index(forFloat32PropertyNamed name: String) throws -> Int {
-        guard let index = index(forPropertyNamed: name) else { throw SplatPLYSceneReader.Error.unsupportedFileContents("No property named \"\(name)\" found") }
-        guard case .primitive(.float32) = properties[index].type else { throw SplatPLYSceneReader.Error.unsupportedFileContents("Unexpected type for property \"\(name)\"") }
-        return index
+    func index(forFloat32PropertyNamed names: [String]) throws -> Int {
+        for name in names {
+            if let index = index(forPropertyNamed: name) {
+                guard case .primitive(.float32) = properties[index].type else { throw SplatPLYSceneReader.Error.unsupportedFileContents("Unexpected type for property \"\(name)\"") }
+                return index
+            }
+        }
+        throw SplatPLYSceneReader.Error.unsupportedFileContents("No property named \"\(names.first ?? "(none)")\" found")
     }
 }
 
