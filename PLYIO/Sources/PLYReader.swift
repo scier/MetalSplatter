@@ -8,9 +8,9 @@ public protocol PLYReaderDelegate {
 }
 
 public class PLYReader {
-    public enum Error: Swift.Error {
-        case cannotOpenSource
-        case readError
+    public enum Error: LocalizedError {
+        case cannotOpenSource(URL)
+        case readError(URL)
         case headerStartMissing
         case headerEndMissing
         case headerFormatMissing
@@ -21,12 +21,50 @@ public class PLYReader {
         case headerInvalidFileFormatType(String)
         case headerUnknownPropertyType(String)
         case headerInvalidListCountType(String)
-        case bodyInvalidCharacters(PLYHeader.Element, Int)
         case bodyInvalidStringForPropertyType(PLYHeader.Element, Int, PLYHeader.Property)
         case bodyMissingPropertyValuesInElement(PLYHeader.Element, Int, PLYHeader.Property)
         case bodyUnexpectedValuesInElement(PLYHeader.Element, Int)
-        case unexpectedEndOfFile
+        case unexpectedEndOfFile(URL)
         case internalConsistency
+
+        public var errorDescription: String? {
+            switch self {
+            case .cannotOpenSource(let url):
+                "Cannot open source file at \(url)"
+            case .readError(let url):
+                "Error while reading \(url)"
+            case .headerStartMissing:
+                "Header start missing"
+            case .headerEndMissing:
+                "Header end missing"
+            case .headerFormatMissing:
+                "Header format missing"
+            case .headerInvalidCharacters:
+                "Invalid characters in header"
+            case .headerUnknownKeyword(let keyword):
+                "Unknown keyword in header: \"\(keyword)\""
+            case .headerUnexpectedKeyword(let keyword):
+                "Unexpected keyword in header: \"\(keyword)\""
+            case .headerInvalidLine(let line):
+                "Invalid line in header: \"\(line)\""
+            case .headerInvalidFileFormatType(let type):
+                "Invalid file format type in header: \(type)"
+            case .headerUnknownPropertyType(let type):
+                "Unknown property type: \(type)"
+            case .headerInvalidListCountType(let type):
+                "Invalid list count type: \(type)"
+            case .bodyInvalidStringForPropertyType(let headerElement, let elementIndex, let headerProperty):
+                "Invalid type string for property \(headerProperty.name) in element \(headerElement.name), index \(elementIndex)"
+            case .bodyMissingPropertyValuesInElement(let headerElement, let elementIndex, let headerProperty):
+                "Missing values for property \(headerProperty.name) in element \(headerElement.name), index \(elementIndex)"
+            case .bodyUnexpectedValuesInElement(let headerElement, let elementIndex):
+                "Unexpected values in element \(headerElement.name), index \(elementIndex)"
+            case .unexpectedEndOfFile(let url):
+                "Unexpected end-of-file while reading \(url)"
+            case .internalConsistency:
+                "Internal error in PLYReader"
+            }
+        }
     }
 
     fileprivate enum Constants {
@@ -83,7 +121,7 @@ fileprivate class PLYReaderStream {
         currentElementCountInGroup = 0
 
         guard let inputStream = InputStream(url: url) else {
-            delegate.didFailReading(withError: PLYReader.Error.cannotOpenSource)
+            delegate.didFailReading(withError: PLYReader.Error.cannotOpenSource(url))
             return
         }
 
@@ -102,7 +140,7 @@ fileprivate class PLYReaderStream {
             let bytesRead: Int
             switch readResult {
             case -1:
-                delegate.didFailReading(withError: PLYReader.Error.readError)
+                delegate.didFailReading(withError: PLYReader.Error.readError(url))
                 return
             case 0:
                 switch phase {
@@ -121,7 +159,7 @@ fileprivate class PLYReaderStream {
                         return
                     }
                 }
-                delegate.didFailReading(withError: PLYReader.Error.unexpectedEndOfFile)
+                delegate.didFailReading(withError: PLYReader.Error.unexpectedEndOfFile(url))
                 return
             default:
                 bytesRead = readResult

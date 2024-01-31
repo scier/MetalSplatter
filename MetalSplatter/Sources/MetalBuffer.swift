@@ -7,9 +7,18 @@ fileprivate let log =
            category: "MetalBuffer")
 
 class MetalBuffer<T> {
-    enum Error: Swift.Error {
-        case capacityGreatedThanMaxCapacity
+    enum Error: LocalizedError {
+        case capacityGreatedThanMaxCapacity(requested: Int, max: Int)
         case bufferCreationFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .capacityGreatedThanMaxCapacity(let requested, let max):
+                "Requested metal buffer size (\(requested)) exceeds device maximum (\(max))"
+            case .bufferCreationFailed:
+                "Failed to create metal buffer"
+            }
+        }
     }
 
     let device: MTLDevice
@@ -22,7 +31,7 @@ class MetalBuffer<T> {
     init(device: MTLDevice, capacity: Int = 1) throws {
         let capacity = max(capacity, 1)
         guard capacity <= Self.maxCapacity(for: device) else {
-            throw Error.capacityGreatedThanMaxCapacity
+            throw Error.capacityGreatedThanMaxCapacity(requested: capacity, max: Self.maxCapacity(for: device))
         }
 
         self.device = device
@@ -49,7 +58,7 @@ class MetalBuffer<T> {
         let newCapacity = max(newCapacity, 1)
         guard newCapacity != capacity else { return }
         guard capacity <= maxCapacity else {
-            throw Error.capacityGreatedThanMaxCapacity
+            throw Error.capacityGreatedThanMaxCapacity(requested: capacity, max: maxCapacity)
         }
 
         log.info("Allocating a new buffer of size \(MemoryLayout<T>.stride) * \(newCapacity) = \(Float(MemoryLayout<T>.stride * newCapacity) / (1024.0 * 1024.0))mb")

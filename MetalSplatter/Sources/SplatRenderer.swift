@@ -119,6 +119,8 @@ public class SplatRenderer {
     // So for every i in 0..<orderAndDepthTempSort.count, orderAndDepthTempSort should contain exactly one element with .index = i
     var orderAndDepthTempSort: [SplatIndexAndDepth] = []
 
+    var readFailure: Error?
+
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
                 depthFormat: MTLPixelFormat,
@@ -167,8 +169,13 @@ public class SplatRenderer {
         orderAndDepthTempSort = []
     }
 
-    public func readPLY(from url: URL) {
+    public func readPLY(from url: URL) throws {
+        readFailure = nil
         SplatPLYSceneReader(url).read(to: self)
+        if let readFailure {
+            self.readFailure = nil
+            throw readFailure
+        }
     }
 
     private class func buildRenderPipelineWithDevice(device: MTLDevice,
@@ -451,6 +458,7 @@ extension SplatRenderer: SplatSceneReaderDelegate {
     }
 
     public func didFailReading(withError error: Error?) {
+        readFailure = error
         Self.log.error("Failed to read points: \(error)")
     }
 }

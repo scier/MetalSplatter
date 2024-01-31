@@ -2,11 +2,25 @@ import Foundation
 import PLYIO
 
 public class SplatPLYSceneReader: SplatSceneReader {
-    enum Error: Swift.Error {
+    enum Error: LocalizedError {
         case unsupportedFileContents(String?)
         case unexpectedPointCountDiscrepancy
         case internalConsistency(String?)
-        case pointElementPropertyValueMissingOrInvalid(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .unsupportedFileContents(let description):
+                if let description {
+                    "Unexpected file contents for a splat PLY: \(description)"
+                } else {
+                    "Unexpected file contents for a splat PLY"
+                }
+            case .unexpectedPointCountDiscrepancy:
+                "Unexpected point count discrepancy"
+            case .internalConsistency(let description):
+                "Internal error in SplatPLYSceneReader: \(description ?? "(unknown)")"
+            }
+        }
     }
 
     private let ply: PLYReader
