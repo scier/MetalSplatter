@@ -365,7 +365,7 @@ public class SplatRenderer {
                     orderBufferPrime.append(orderAndDepthTempSort[i].index)
                 }
                 let t3 = Date()
-                Self.log.info("Sorted \(self.orderAndDepthTempSort.count) elements via Array.sort in \(t3.timeIntervalSince(t0)) seconds (\(t2.timeIntervalSince(t1)) in sort itself)")
+                Self.log.debug("Sorted \(self.orderAndDepthTempSort.count) elements via Array.sort in \(t3.timeIntervalSince(t0)) seconds (\(t2.timeIntervalSince(t1)) in sort itself)")
                 
                 swap(&orderBuffer, &orderBufferPrime)
             } catch {
@@ -432,7 +432,7 @@ public class SplatRenderer {
                     orderBufferPrime.append(UInt32(orderBufferTempSort.values[i]))
                 }
                 let t3 = Date()
-                Self.log.info("Sorted via Accelerate.vDSP_vsorti in \(t3.timeIntervalSince(t0)) seconds (\(t2.timeIntervalSince(t1)) in sort itself)")
+                Self.log.debug("Sorted via Accelerate.vDSP_vsorti in \(t3.timeIntervalSince(t0)) seconds (\(t2.timeIntervalSince(t1)) in sort itself)")
 
                 swap(&orderBuffer, &orderBufferPrime)
             } catch {
