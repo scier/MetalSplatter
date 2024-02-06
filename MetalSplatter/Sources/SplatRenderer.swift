@@ -238,13 +238,26 @@ public class SplatRenderer {
                                  exp(point.scale.y),
                                  exp(point.scale.z))
         let rotation = point.rotation.normalized
-        let SH_C0: Float = 0.28209479177387814
-        let color = SIMD3<Float>(x: max(0, min(1, 0.5 + SH_C0 * point.color.x)),
-                                 y: max(0, min(1, 0.5 + SH_C0 * point.color.y)),
-                                 z: max(0, min(1, 0.5 + SH_C0 * point.color.z)))
+
+        var color: SIMD3<Float>
+        switch point.color {
+        case let .sphericalHarmonic(r, g, b, _), let .firstOrderSphericalHarmonic(r, g, b):
+            let SH_C0: Float = 0.28209479177387814
+            color = SIMD3(x: max(0, min(1, 0.5 + SH_C0 * r)),
+                          y: max(0, min(1, 0.5 + SH_C0 * g)),
+                          z: max(0, min(1, 0.5 + SH_C0 * b)))
+        case .linearFloat(let r, let g, let b):
+            color = SIMD3(x: r / 255.0, y: g / 255.0, z: b / 255.0)
+        case .linearUInt8(let r, let g, let b):
+            color = SIMD3(x: Float(r) / 255.0, y: Float(g) / 255.0, z: Float(b) / 255.0)
+        case .none:
+            color = .zero
+        }
+
         let opacity = 1 / (1 + exp(-point.opacity))
+
         let splat = Splat(position: point.position,
-                          color: .init(x: color.x, y: color.y, z: color.z, w: opacity),
+                          color: .init(color.sRGBToLinear, opacity),
                           scale: scale,
                           rotation: rotation)
 
@@ -496,6 +509,12 @@ private extension SIMD3 where Scalar: BinaryFloatingPoint, Scalar.RawSignificand
 
     static func random(in range: Range<Scalar>) -> SIMD3<Scalar> {
         Self(x: Scalar.random(in: range), y: .random(in: range), z: .random(in: range))
+    }
+}
+
+private extension SIMD3<Float> {
+    var sRGBToLinear: SIMD3<Float> {
+        SIMD3(x: pow(x, 2.2), y: pow(y, 2.2), z: pow(z, 2.2))
     }
 }
 

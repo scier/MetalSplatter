@@ -49,10 +49,6 @@ typedef struct
     float4 color;
 } ColorInOut;
 
-float4 decodeGamma(float4 v) {
-    return float4(pow(v.rgb, float3(2.2)), v.a);
-}
-
 float3x3 quaternionToMatrix(float4 quaternion) {
     float3x3 rotationMatrix;
     rotationMatrix[0] = {
@@ -217,8 +213,7 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
 
     out.position = float4(screenVertex.x, screenVertex.y, 0, 1);
     out.textureCoordinates = textureCoordinates;
-    // the color here is in gamma space, so bring it to linear
-    out.color = decodeGamma(splat.color);
+    out.color = splat.color;
     return out;
 }
 
