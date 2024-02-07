@@ -70,6 +70,12 @@ struct ContentView: View {
                 isPickingFile = false
                 switch $0 {
                 case .success(let url):
+                    _ = url.startAccessingSecurityScopedResource()
+                    Task {
+                        // This is a sample app. In a real app, this should be more tightly scoped, not using a silly timer.
+                        try await Task.sleep(for: .seconds(10))
+                        url.stopAccessingSecurityScopedResource()
+                    }
                     openWindow(value: ModelIdentifier.gaussianSplat(url))
                 case .failure:
                     break
