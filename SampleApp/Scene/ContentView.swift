@@ -90,7 +90,7 @@ struct ContentView: View {
             Spacer()
 
 #if os(visionOS)
-            Button("Dismiss Immersive Spce") {
+            Button("Dismiss Immersive Space") {
                 Task {
                     await dismissImmersiveSpace()
                     immersiveSpaceIsShown = false
