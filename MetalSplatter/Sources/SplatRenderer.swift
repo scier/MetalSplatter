@@ -11,7 +11,7 @@ public class SplatRenderer {
         // Sort by euclidian distance squared from camera position (true), or along the "forward" vector (false)
         // TODO: compare the behaviour and performance of sortByDistance
         // notes: sortByDistance introduces unstable artifacts when you get close to an object; whereas !sortByDistance introduces artifacts are you turn -- but they're a little subtler maybe?
-        static let sortByDistance = false
+        static let sortByDistance = true
         // TODO: compare the performance of useAccelerateForSort, both for small and large scenes
         static let useAccelerateForSort = false
         static let renderFrontToBack = true
