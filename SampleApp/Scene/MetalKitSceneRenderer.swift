@@ -78,7 +78,8 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
 
         return (projection: projectionMatrix,
-                view: translationMatrix * rotationMatrix * commonUpCalibration)
+                view: translationMatrix * rotationMatrix * commonUpCalibration,
+                screenSize: SIMD2(x: Int(drawableSize.width), y: Int(drawableSize.height)))
     }
 
     private func updateRotation() {

@@ -15,14 +15,23 @@ public class SplatRenderer {
         // TODO: compare the performance of useAccelerateForSort, both for small and large scenes
         static let useAccelerateForSort = false
         static let renderFrontToBack = true
-        static let screenWidth: UInt32 = 1024
     }
 
     private static let log =
         Logger(subsystem: Bundle.module.bundleIdentifier!,
                category: "SplatRenderer")
 
-    public typealias CameraMatrices = ( projection: simd_float4x4, view: simd_float4x4 )
+    public struct CameraDescriptor {
+        public var projectionMatrix: simd_float4x4
+        public var viewMatrix: simd_float4x4
+        public var screenSize: SIMD2<Int>
+
+        public init(projectionMatrix: simd_float4x4, viewMatrix: simd_float4x4, screenSize: SIMD2<Int>) {
+            self.projectionMatrix = projectionMatrix
+            self.viewMatrix = viewMatrix
+            self.screenSize = screenSize
+        }
+    }
 
     // Keep in sync with Shaders.metal : BufferIndex
     enum BufferIndex: NSInteger {
@@ -264,7 +273,7 @@ public class SplatRenderer {
         splatBuffer.append([ splat ])
     }
 
-    public func willRender(viewportCameras: [CameraMatrices]) {}
+    public func willRender(viewportCameras: [CameraDescriptor]) {}
 
     private func switchToNextDynamicBuffer() {
         uniformBufferIndex = (uniformBufferIndex + 1) % maxSimultaneousRenders
@@ -272,17 +281,16 @@ public class SplatRenderer {
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffers.contents() + uniformBufferOffset).bindMemory(to: UniformsArray.self, capacity: 1)
     }
 
-    private func updateUniforms(forViewportCameras viewportCameras: [CameraMatrices]) {
+    private func updateUniforms(forViewportCameras viewportCameras: [CameraDescriptor]) {
         for (i, viewportCamera) in viewportCameras.enumerated() where i <= maxViewCount {
-            let screenWidth = Constants.screenWidth
-            let screenHeight = UInt32(round(Float(screenWidth) * viewportCamera.projection[0][0] / viewportCamera.projection[1][1]))
-            let screenSize = SIMD2<UInt32>(x: screenWidth, y: screenHeight)
-            let uniforms = Uniforms(projectionMatrix: viewportCamera.projection, viewMatrix: viewportCamera.view, screenSize: screenSize)
+            let uniforms = Uniforms(projectionMatrix: viewportCamera.projectionMatrix,
+                                    viewMatrix: viewportCamera.viewMatrix,
+                                    screenSize: SIMD2(x: UInt32(viewportCamera.screenSize.x), y: UInt32(viewportCamera.screenSize.y)))
             self.uniforms.pointee.setUniforms(index: i, uniforms)
         }
 
-        cameraWorldPosition = viewportCameras.map { Self.cameraWorldPosition(forViewMatrix: $0.view) }.mean ?? .zero
-        cameraWorldForward = viewportCameras.map { Self.cameraWorldForward(forViewMatrix: $0.view) }.mean?.normalized ?? .init(x: 0, y: 0, z: -1)
+        cameraWorldPosition = viewportCameras.map { Self.cameraWorldPosition(forViewMatrix: $0.viewMatrix) }.mean ?? .zero
+        cameraWorldForward = viewportCameras.map { Self.cameraWorldForward(forViewMatrix: $0.viewMatrix) }.mean?.normalized ?? .init(x: 0, y: 0, z: -1)
 
         if !sorting {
             resortIndices()
@@ -297,7 +305,7 @@ public class SplatRenderer {
         (view.inverse * SIMD4<Float>(x: 0, y: 0, z: 0, w: 1)).xyz
     }
 
-    public func render(viewportCameras: [CameraMatrices], to renderEncoder: MTLRenderCommandEncoder) {
+    public func render(viewportCameras: [CameraDescriptor], to renderEncoder: MTLRenderCommandEncoder) {
         guard splatBuffer.count != 0 else { return }
 
         switchToNextDynamicBuffer()

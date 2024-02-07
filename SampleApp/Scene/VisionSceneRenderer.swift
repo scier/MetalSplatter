@@ -109,8 +109,11 @@ class VisionSceneRenderer {
                                                          nearZ: Double(drawable.depthRange.y),
                                                          farZ: Double(drawable.depthRange.x),
                                                          reverseZ: true)
+            let screenSize = SIMD2(x: Int(view.textureMap.viewport.width),
+                                   y: Int(view.textureMap.viewport.height))
             return (projection: .init(projectionMatrix),
-                    view: userViewpointMatrix * translationMatrix * rotationMatrix * commonUpCalibration)
+                    view: userViewpointMatrix * translationMatrix * rotationMatrix * commonUpCalibration,
+                    screenSize: screenSize)
         }
     }
 

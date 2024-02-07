@@ -19,7 +19,17 @@ public class SampleBoxRenderer {
         case depthStencilStateCreationFailed
     }
 
-    public typealias CameraMatrices = ( projection: simd_float4x4, view: simd_float4x4 )
+    public struct CameraDescriptor {
+        public var projectionMatrix: simd_float4x4
+        public var viewMatrix: simd_float4x4
+        public var screenSize: SIMD2<Int>
+
+        public init(projectionMatrix: simd_float4x4, viewMatrix: simd_float4x4, screenSize: SIMD2<Int>) {
+            self.projectionMatrix = projectionMatrix
+            self.viewMatrix = viewMatrix
+            self.screenSize = screenSize
+        }
+    }
 
     enum BufferIndex: NSInteger {
         case meshPositions = 0
@@ -127,7 +137,7 @@ public class SampleBoxRenderer {
         }
     }
 
-    public func willRender(viewportCameras: [CameraMatrices]) {}
+    public func willRender(viewportCameras: [CameraDescriptor]) {}
 
     private func updateDynamicBufferState() {
         uniformBufferIndex = (uniformBufferIndex + 1) % maxSimultaneousRenders
@@ -135,13 +145,14 @@ public class SampleBoxRenderer {
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents() + uniformBufferOffset).bindMemory(to: UniformsArray.self, capacity: 1)
     }
 
-    private func updateUniforms(forViewportCameras viewportCameras: [CameraMatrices]) {
+    private func updateUniforms(forViewportCameras viewportCameras: [CameraDescriptor]) {
         for (i, viewportCamera) in viewportCameras.enumerated() where i <= maxViewCount {
-            uniforms.pointee.setUniforms(index: i, Uniforms(projectionMatrix: viewportCamera.projection, viewMatrix: viewportCamera.view))
+            uniforms.pointee.setUniforms(index: i, Uniforms(projectionMatrix: viewportCamera.projectionMatrix,
+                                                            viewMatrix: viewportCamera.viewMatrix))
         }
     }
 
-    public func render(viewportCameras: [CameraMatrices], to renderEncoder: MTLRenderCommandEncoder) {
+    public func render(viewportCameras: [CameraDescriptor], to renderEncoder: MTLRenderCommandEncoder) {
         updateDynamicBufferState()
         updateUniforms(forViewportCameras: viewportCameras)
 
