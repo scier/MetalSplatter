@@ -45,21 +45,21 @@ class VisionSceneRenderer {
         arSession = ARKitSession()
     }
 
-    func load(_ model: ModelIdentifier?) {
+    func load(_ model: ModelIdentifier?) throws {
         guard model != self.model else { return }
         self.model = model
 
         modelRenderer = nil
         switch model {
         case .gaussianSplat(let url):
-            let splat = try! SplatRenderer(device: device,
-                                           colorFormat: layerRenderer.configuration.colorFormat,
-                                           depthFormat: layerRenderer.configuration.depthFormat,
-                                           stencilFormat: .invalid,
-                                           sampleCount: 1,
-                                           maxViewCount: layerRenderer.properties.viewCount,
-                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            splat.readPLY(from: url)
+            let splat = try SplatRenderer(device: device,
+                                          colorFormat: layerRenderer.configuration.colorFormat,
+                                          depthFormat: layerRenderer.configuration.depthFormat,
+                                          stencilFormat: .invalid,
+                                          sampleCount: 1,
+                                          maxViewCount: layerRenderer.properties.viewCount,
+                                          maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            try splat.readPLY(from: url)
             modelRenderer = splat
         case .sampleBox:
             modelRenderer = try! SampleBoxRenderer(device: device,

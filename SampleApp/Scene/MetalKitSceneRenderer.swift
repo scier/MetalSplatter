@@ -35,21 +35,21 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         metalKitView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
     }
 
-    func load(_ model: ModelIdentifier?) {
+    func load(_ model: ModelIdentifier?) throws {
         guard model != self.model else { return }
         self.model = model
 
         modelRenderer = nil
         switch model {
         case .gaussianSplat(let url):
-            let splat = try! SplatRenderer(device: device,
-                                           colorFormat: metalKitView.colorPixelFormat,
-                                           depthFormat: metalKitView.depthStencilPixelFormat,
-                                           stencilFormat: metalKitView.depthStencilPixelFormat,
-                                           sampleCount: metalKitView.sampleCount,
-                                           maxViewCount: 1,
-                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            splat.readPLY(from: url)
+            let splat = try SplatRenderer(device: device,
+                                          colorFormat: metalKitView.colorPixelFormat,
+                                          depthFormat: metalKitView.depthStencilPixelFormat,
+                                          stencilFormat: metalKitView.depthStencilPixelFormat,
+                                          sampleCount: metalKitView.sampleCount,
+                                          maxViewCount: 1,
+                                          maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            try splat.readPLY(from: url)
             modelRenderer = splat
         case .sampleBox:
             modelRenderer = try! SampleBoxRenderer(device: device,

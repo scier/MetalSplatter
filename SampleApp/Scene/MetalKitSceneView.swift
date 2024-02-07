@@ -41,7 +41,11 @@ struct MetalKitSceneView: ViewRepresentable {
         coordinator.renderer = renderer
         metalKitView.delegate = renderer
 
-        renderer?.load(modelIdentifier)
+        do {
+            try renderer?.load(modelIdentifier)
+        } catch {
+            print("Error loading model: \(error.localizedDescription)")
+        }
 
         return metalKitView
     }
@@ -57,7 +61,11 @@ struct MetalKitSceneView: ViewRepresentable {
 #endif
 
     private func updateView(_ coordinator: Coordinator) {
-        coordinator.renderer?.load(modelIdentifier)
+        do {
+            try coordinator.renderer?.load(modelIdentifier)
+        } catch {
+            print("Error loading model: \(error.localizedDescription)")
+        }
     }
 }
 
