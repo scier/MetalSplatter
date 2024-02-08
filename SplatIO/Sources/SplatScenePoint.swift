@@ -22,20 +22,17 @@ public struct SplatScenePoint {
     }
 
     public var position: SIMD3<Float>
-    public var normal: SIMD3<Float>
     public var color: Color
     public var opacity: Float
     public var scale: SIMD3<Float>
     public var rotation: simd_quatf
 
     public init(position: SIMD3<Float>,
-                normal: SIMD3<Float>,
                 color: Color,
                 opacity: Float,
                 scale: SIMD3<Float>,
                 rotation: simd_quatf) {
         self.position = position
-        self.normal = normal
         self.color = color
         self.opacity = opacity
         self.scale = scale
