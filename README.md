@@ -1,6 +1,8 @@
 # MetalSplatter
 Render 3D Gaussian Splats using Metal on Apple platforms (iOS/iPhone/iPad, macOS, and visionOS/Vision Pro)
 
+![A greek-style bust of a woman made of metal, wearing aviator-style goggles while gazing toward colorful abstract metallic blobs floating in space](http://metalsplatter.com/hero.640.jpg)
+
 This is a Swift/Metal library for rendering scenes captured via the techniques described in [3D Gaussian Splatting for Real-Time Radiance Field Rendering](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/). It will let you load up a PLY and visualize it on iOS, macOS, and visionOS (using amplification for rendering in stereo on Vision Pro). Modules include
 * MetalSplatter, the core library to render a frame
 * PLYIO, for reading binary or ASCII PLY files (not writing yet, despite the name); this is standalone, feel free to use it if you just have a hankering to load up some PLY files for some reason.
@@ -10,12 +12,11 @@ This is a Swift/Metal library for rendering scenes captured via the techniques d
 
 ## Minimal early version
 
-There are a lot of big pieces and optimizations missing here, it's still very much a work in progress, but
+There are a lot of optimizations missing here, it's still very much a work in progress, but
 I'm putting this out there in case there are any brave curious souls that want to tinker with it.
 
 ### TODO / general shortcomings
 
-* Fix colors, which currently aren't quite correct
 * Reduce precision to improve memory usage
 * Precompute the covariance matrix, to slightly reduce memory usage and time spent in the vertex shader
 * Spherical harmonics
@@ -37,6 +38,11 @@ You're right, the documentation is entirely missing. I mean, it's kinda embarras
 3. If you want to run on iOS/visionOS, select your target and set your development team and bundle ID in Signing & Capabilities. On macOS, just have at it.
 4. Set your scheme to Release mode. Loading large PLY files is in Debug more than an order of magnitude slower.
 5. Run it
+
+## MetalSplatter Model Viewer
+
+There's a simple, official [MetalSplatter model viewer app](https://apps.apple.com/us/app/metalsplatter/id6476895334) based on this library,
+available on visionOS for Vision Pro (support for iOS/macOS is coming later). It's also called MetalSplatter, go figure.
 
 ## Acknowledgements
 
