@@ -91,6 +91,9 @@ public class SplatRenderer {
     public let maxViewCount: Int
     public let maxSimultaneousRenders: Int
 
+    public var onSortStart: (() -> Void)?
+    public var onSortComplete: ((TimeInterval) -> Void)?
+
     // dynamicUniformBuffers contains maxSimultaneousRenders uniforms buffers,
     // which we round-robin through, one per render; this is managed by switchToNextDynamicBuffer.
     // uniforms = the i'th buffer (where i = uniformBufferIndex, which varies from 0 to maxSimultaneousRenders-1)
@@ -108,6 +111,8 @@ public class SplatRenderer {
     var splatBuffer: MetalBuffer<Splat>
     // orderBuffer indexes into splatBuffer, and is sorted by distance
     var orderBuffer: MetalBuffer<IndexType>
+
+    public var splatCount: Int { splatBuffer.count }
 
     var sorting = false
     // orderBufferPrime is a copy of orderBuffer, which is not currenly in use for rendering.
@@ -128,7 +133,7 @@ public class SplatRenderer {
     // So for every i in 0..<orderAndDepthTempSort.count, orderAndDepthTempSort should contain exactly one element with .index = i
     var orderAndDepthTempSort: [SplatIndexAndDepth] = []
 
-    var readFailure: Error?
+    private var readFailure: Error?
 
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
@@ -341,6 +346,8 @@ public class SplatRenderer {
     public func resortIndicesOnCPU() {
         guard !sorting else { return }
         sorting = true
+        onSortStart?()
+        let sortStartTime = Date()
 
         let splatCount = splatBuffer.count
 
@@ -354,10 +361,10 @@ public class SplatRenderer {
         let cameraWorldForward = cameraWorldForward
         let cameraWorldPosition = cameraWorldPosition
 
-        let t0 = Date()
         Task(priority: .high) {
             defer {
                 sorting = false
+                onSortComplete?(-sortStartTime.timeIntervalSinceNow)
             }
 
             // We maintain the old order in indicesAndDepthTempSort in order to provide the opportunity to optimize the sort performance
@@ -371,13 +378,11 @@ public class SplatRenderer {
                 }
             }
 
-            let t1 = Date()
             if Constants.renderFrontToBack {
                 orderAndDepthTempSort.sort { $0.depth < $1.depth }
             } else {
                 orderAndDepthTempSort.sort { $0.depth > $1.depth }
             }
-            let t2 = Date()
 
             do {
                 orderBufferPrime.count = 0
@@ -385,9 +390,7 @@ public class SplatRenderer {
                 for i in 0..<splatCount {
                     orderBufferPrime.append(orderAndDepthTempSort[i].index)
                 }
-                let t3 = Date()
-                Self.log.debug("Sorted \(self.orderAndDepthTempSort.count) elements via Array.sort in \(t3.timeIntervalSince(t0)) seconds (\(t2.timeIntervalSince(t1)) in sort itself)")
-                
+
                 swap(&orderBuffer, &orderBufferPrime)
             } catch {
                 // TODO: report error
@@ -398,6 +401,8 @@ public class SplatRenderer {
     public func resortIndicesViaAccelerate() {
         guard !sorting else { return }
         sorting = true
+        onSortStart?()
+        let sortStartTime = Date()
 
         let splatCount = splatBuffer.count
 
@@ -421,10 +426,10 @@ public class SplatRenderer {
         let cameraWorldForward = cameraWorldForward
         let cameraWorldPosition = cameraWorldPosition
 
-        let t0 = Date()
         Task(priority: .high) {
             defer {
                 sorting = false
+                onSortComplete?(-sortStartTime.timeIntervalSinceNow)
             }
 
             // TODO: use Accelerate to calculate the depth
@@ -438,13 +443,11 @@ public class SplatRenderer {
                 }
             }
 
-            let t1 = Date()
             vDSP_vsorti(depthBufferTempSort.values,
                         orderBufferTempSort.values,
                         nil,
                         vDSP_Length(splatCount),
                         Constants.renderFrontToBack ? 1 : -1)
-            let t2 = Date()
 
             do {
                 orderBufferPrime.count = 0
@@ -452,8 +455,6 @@ public class SplatRenderer {
                 for i in 0..<splatCount {
                     orderBufferPrime.append(UInt32(orderBufferTempSort.values[i]))
                 }
-                let t3 = Date()
-                Self.log.debug("Sorted via Accelerate.vDSP_vsorti in \(t3.timeIntervalSince(t0)) seconds (\(t2.timeIntervalSince(t1)) in sort itself)")
 
                 swap(&orderBuffer, &orderBufferPrime)
             } catch {
