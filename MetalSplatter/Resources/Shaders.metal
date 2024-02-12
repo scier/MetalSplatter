@@ -14,14 +14,6 @@ enum BufferIndex: int32_t
     BufferIndexOrder    = 2,
 };
 
-enum SplatAttribute: int32_t
-{
-    SplatAttributePosition     = 0,
-    SplatAttributeColor        = 1,
-    SplatAttributeScale        = 2,
-    SplatAttributeRotationQuat = 3,
-};
-
 typedef struct
 {
     matrix_float4x4 projectionMatrix;
@@ -36,10 +28,10 @@ typedef struct
 
 typedef struct
 {
-    float3 position      [[attribute(SplatAttributePosition)]];
-    float4 color         [[attribute(SplatAttributeColor)]];
-    float3 scale         [[attribute(SplatAttributeScale)]];
-    float4 rotationQuat  [[attribute(SplatAttributeRotationQuat)]];
+    packed_float3 position;
+    packed_half4 color;
+    packed_half3 covA;
+    packed_half3 covB;
 } Splat;
 
 typedef struct
@@ -49,44 +41,9 @@ typedef struct
     float4 color;
 } ColorInOut;
 
-float3x3 quaternionToMatrix(float4 quaternion) {
-    float3x3 rotationMatrix;
-    rotationMatrix[0] = {
-        1 - 2 * (quaternion.z * quaternion.z + quaternion.w * quaternion.w),
-            2 * (quaternion.y * quaternion.z + quaternion.x * quaternion.w),
-            2 * (quaternion.y * quaternion.w - quaternion.x * quaternion.z),
-    };
-    rotationMatrix[1] = {
-            2 * (quaternion.y * quaternion.z - quaternion.x * quaternion.w),
-        1 - 2 * (quaternion.y * quaternion.y + quaternion.w * quaternion.w),
-            2 * (quaternion.z * quaternion.w + quaternion.x * quaternion.y),
-    };
-    rotationMatrix[2] = {
-            2 * (quaternion.y * quaternion.w + quaternion.x * quaternion.z),
-            2 * (quaternion.z * quaternion.w - quaternion.x * quaternion.y),
-        1 - 2 * (quaternion.y * quaternion.y + quaternion.z * quaternion.z),
-    };
-    return rotationMatrix;
-}
-
-float3x3 scaleToMatrix(float3 scale) {
-    float3x3 scaleMatrix;
-    scaleMatrix[0] = { scale.x, 0, 0 };
-    scaleMatrix[1] = { 0, scale.y, 0 };
-    scaleMatrix[2] = { 0, 0, scale.z };
-    return scaleMatrix;
-}
-
-void calcCovariance3D(float3 scale, float4 quaternion, thread float3 &cov3Da, thread float3 &cov3Db) {
-    float3x3 transform = quaternionToMatrix(quaternion) * scaleToMatrix(scale);
-    float3x3 cov3D = transform * transpose(transform);
-    cov3Da = float3(cov3D[0][0], cov3D[0][1], cov3D[0][2]);
-    cov3Db = float3(cov3D[1][1], cov3D[1][2], cov3D[2][2]);
-}
-
 float3 calcCovariance2D(float3 worldPos,
-                        float3 cov3Da,
-                        float3 cov3Db,
+                        packed_half3 cov3Da,
+                        packed_half3 cov3Db,
                         float4x4 viewMatrix,
                         float4x4 projectionMatrix,
                         uint2 screenSize) {
@@ -171,9 +128,7 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
 
     Splat splat = splatArray[orderArray[instanceID]];
 
-    float3 cov3Da, cov3Db;
-    calcCovariance3D(splat.scale, splat.rotationQuat, cov3Da, cov3Db);
-    float3 cov2D = calcCovariance2D(splat.position, cov3Da, cov3Db,
+    float3 cov2D = calcCovariance2D(splat.position, splat.covA, splat.covB,
                                     uniforms.viewMatrix, uniforms.projectionMatrix, uniforms.screenSize);
 
     float2 axis1;
@@ -213,7 +168,7 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
 
     out.position = float4(screenVertex.x, screenVertex.y, 0, 1);
     out.textureCoordinates = textureCoordinates;
-    out.color = splat.color;
+    out.color = float4(splat.color);
     return out;
 }
 

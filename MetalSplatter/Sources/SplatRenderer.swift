@@ -40,14 +40,6 @@ public class SplatRenderer {
         case order    = 2
     }
 
-    // Keep in sync with Shaders.metal : SplatAttribute
-    enum SplatAttribute: NSInteger, CaseIterable {
-        case position     = 0
-        case color        = 1
-        case scale        = 2
-        case rotationQuat = 3
-    }
-
     // Keep in sync with Shaders.metal : Uniforms
     struct Uniforms {
         var projectionMatrix: matrix_float4x4
@@ -73,12 +65,25 @@ public class SplatRenderer {
         }
     }
 
+    struct PackedHalf3 {
+        var x: Float16
+        var y: Float16
+        var z: Float16
+    }
+
+    struct PackedRGBHalf4 {
+        var r: Float16
+        var g: Float16
+        var b: Float16
+        var a: Float16
+    }
+
     // Keep in sync with Shaders.metal : Vertex
     struct Splat {
-        var position: SIMD3<Float>
-        var color: SIMD4<Float>
-        var scale: SIMD3<Float>
-        var rotation: simd_quatf
+        var position: MTLPackedFloat3
+        var color: PackedRGBHalf4
+        var covA: PackedHalf3
+        var covB: PackedHalf3
     }
 
     struct SplatIndexAndDepth {
@@ -248,34 +253,7 @@ public class SplatRenderer {
             return
         }
 
-        let scale = SIMD3<Float>(exp(point.scale.x),
-                                 exp(point.scale.y),
-                                 exp(point.scale.z))
-        let rotation = point.rotation.normalized
-
-        var color: SIMD3<Float>
-        switch point.color {
-        case let .sphericalHarmonic(r, g, b, _), let .firstOrderSphericalHarmonic(r, g, b):
-            let SH_C0: Float = 0.28209479177387814
-            color = SIMD3(x: max(0, min(1, 0.5 + SH_C0 * r)),
-                          y: max(0, min(1, 0.5 + SH_C0 * g)),
-                          z: max(0, min(1, 0.5 + SH_C0 * b)))
-        case .linearFloat(let r, let g, let b):
-            color = SIMD3(x: r / 255.0, y: g / 255.0, z: b / 255.0)
-        case .linearUInt8(let r, let g, let b):
-            color = SIMD3(x: Float(r) / 255.0, y: Float(g) / 255.0, z: Float(b) / 255.0)
-        case .none:
-            color = .zero
-        }
-
-        let opacity = 1 / (1 + exp(-point.opacity))
-
-        let splat = Splat(position: point.position,
-                          color: .init(color.sRGBToLinear, opacity),
-                          scale: scale,
-                          rotation: rotation)
-
-        splatBuffer.append([ splat ])
+        splatBuffer.append([ Splat(point) ])
     }
 
     public func willRender(viewportCameras: [CameraDescriptor]) {}
@@ -371,10 +349,11 @@ public class SplatRenderer {
             for i in 0..<splatCount {
                 let index = orderAndDepthTempSort[i].index
                 let splatPosition = splatBuffer.values[Int(index)].position
+                let splatPositionUnpacked = SIMD3<Float>(splatPosition.x, splatPosition.y, splatPosition.z)
                 if Constants.sortByDistance {
-                    orderAndDepthTempSort[i].depth = (splatPosition - cameraWorldPosition).lengthSquared
+                    orderAndDepthTempSort[i].depth = (splatPositionUnpacked - cameraWorldPosition).lengthSquared
                 } else {
-                    orderAndDepthTempSort[i].depth = dot(splatPosition, cameraWorldForward)
+                    orderAndDepthTempSort[i].depth = dot(splatPositionUnpacked, cameraWorldForward)
                 }
             }
 
@@ -436,10 +415,11 @@ public class SplatRenderer {
             // We maintain the old order in indicesTempSort in order to provide the opportunity to optimize the sort performance
             for index in 0..<splatCount {
                 let splatPosition = splatBuffer.values[Int(index)].position
+                let splatPositionUnpacked = SIMD3<Float>(splatPosition.x, splatPosition.y, splatPosition.z)
                 if Constants.sortByDistance {
-                    depthBufferTempSort.values[index] = (splatPosition - cameraWorldPosition).lengthSquared
+                    depthBufferTempSort.values[index] = (splatPositionUnpacked - cameraWorldPosition).lengthSquared
                 } else {
-                    depthBufferTempSort.values[index] = dot(splatPosition, cameraWorldForward)
+                    depthBufferTempSort.values[index] = dot(splatPositionUnpacked, cameraWorldForward)
                 }
             }
 
@@ -461,7 +441,8 @@ public class SplatRenderer {
                 // TODO: report error
             }
         }
-    }}
+    }
+}
 
 extension SplatRenderer: SplatSceneReaderDelegate {
     public func didStartReading(withPointCount pointCount: UInt32) {
@@ -482,6 +463,67 @@ extension SplatRenderer: SplatSceneReaderDelegate {
     public func didFailReading(withError error: Error?) {
         readFailure = error
         Self.log.error("Failed to read points: \(error)")
+    }
+}
+
+extension SplatRenderer.Splat {
+    init(_ splat: SplatScenePoint) {
+        let scale = SIMD3<Float>(exp(splat.scale.x),
+                                 exp(splat.scale.y),
+                                 exp(splat.scale.z))
+        let rotation = splat.rotation.normalized
+
+        var color: SIMD3<Float>
+        switch splat.color {
+        case let .sphericalHarmonic(r, g, b, _), let .firstOrderSphericalHarmonic(r, g, b):
+            let SH_C0: Float = 0.28209479177387814
+            color = SIMD3(x: max(0, min(1, 0.5 + SH_C0 * r)),
+                          y: max(0, min(1, 0.5 + SH_C0 * g)),
+                          z: max(0, min(1, 0.5 + SH_C0 * b)))
+        case .linearFloat(let r, let g, let b):
+            color = SIMD3(x: r / 255.0, y: g / 255.0, z: b / 255.0)
+        case .linearUInt8(let r, let g, let b):
+            color = SIMD3(x: Float(r) / 255.0, y: Float(g) / 255.0, z: Float(b) / 255.0)
+        case .none:
+            color = .zero
+        }
+
+        let opacity = 1 / (1 + exp(-splat.opacity))
+
+        self.init(position: splat.position,
+                  color: .init(color.sRGBToLinear, opacity),
+                  scale: scale,
+                  rotation: rotation)
+    }
+
+    static func quaternionToMatrix(quaternion: simd_quatf) -> simd_float3x3 {
+        var rotationMatrix = simd_float3x3()
+        let x = quaternion.imag.x
+        let y = quaternion.imag.y
+        let z = quaternion.imag.z
+        let w = quaternion.real
+        rotationMatrix[0, 0] = 1 - 2 * (z * z + w * w)
+        rotationMatrix[0, 1] = 2 * (y * z + x * w)
+        rotationMatrix[0, 2] = 2 * (y * w - x * z)
+        rotationMatrix[1, 0] = 2 * (y * z - x * w)
+        rotationMatrix[1, 1] = 1 - 2 * (y * y + w * w)
+        rotationMatrix[1, 2] = 2 * (z * w + x * y)
+        rotationMatrix[2, 0] = 2 * (y * w + x * z)
+        rotationMatrix[2, 1] = 2 * (z * w - x * y)
+        rotationMatrix[2, 2] = 1 - 2 * (y * y + z * z)
+        return rotationMatrix
+    }
+
+    init(position: SIMD3<Float>,
+         color: SIMD4<Float>,
+         scale: SIMD3<Float>,
+         rotation: simd_quatf) {
+        let transform = simd_float3x3(rotation) * simd_float3x3(diagonal: scale)
+        let cov3D = transform * transform.transpose
+        self.init(position: MTLPackedFloat3Make(position.x, position.y, position.z),
+                  color: SplatRenderer.PackedRGBHalf4(r: Float16(color.x), g: Float16(color.y), b: Float16(color.z), a: Float16(color.w)),
+                  covA: SplatRenderer.PackedHalf3(x: Float16(cov3D[0, 0]), y: Float16(cov3D[0, 1]), z: Float16(cov3D[0, 2])),
+                  covB: SplatRenderer.PackedHalf3(x: Float16(cov3D[1, 1]), y: Float16(cov3D[1, 2]), z: Float16(cov3D[2, 2])))
     }
 }
 

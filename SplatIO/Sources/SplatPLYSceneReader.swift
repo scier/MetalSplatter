@@ -142,10 +142,10 @@ private struct PointElementMapping {
         static let scaleY = [ "scale_1" ]
         static let scaleZ = [ "scale_2" ]
         static let opacity = [ "opacity" ]
-        static let rotationI = [ "rot_0" ]
-        static let rotationJ = [ "rot_1" ]
-        static let rotationK = [ "rot_2" ]
-        static let rotationW = [ "rot_3" ]
+        static let rotation0 = [ "rot_0" ]
+        static let rotation1 = [ "rot_1" ]
+        static let rotation2 = [ "rot_2" ]
+        static let rotation3 = [ "rot_3" ]
     }
 
     public enum Color {
@@ -170,10 +170,10 @@ private struct PointElementMapping {
     let scaleYPropertyIndex: Int
     let scaleZPropertyIndex: Int
     let opacityPropertyIndex: Int
-    let rotationIPropertyIndex: Int
-    let rotationJPropertyIndex: Int
-    let rotationKPropertyIndex: Int
-    let rotationWPropertyIndex: Int
+    let rotation0PropertyIndex: Int
+    let rotation1PropertyIndex: Int
+    let rotation2PropertyIndex: Int
+    let rotation3PropertyIndex: Int
 
     static func pointElementMapping(for header: PLYHeader) throws -> PointElementMapping {
         guard let elementTypeIndex = header.index(forElementNamed: ElementName.point.rawValue) else {
@@ -225,10 +225,10 @@ private struct PointElementMapping {
         let scaleZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleZ)
         let opacityPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.opacity)
 
-        let rotationIPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationI)
-        let rotationJPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationJ)
-        let rotationKPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationK)
-        let rotationWPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotationW)
+        let rotation0PropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotation0)
+        let rotation1PropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotation1)
+        let rotation2PropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotation2)
+        let rotation3PropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotation3)
 
         return PointElementMapping(elementTypeIndex: elementTypeIndex,
                                    positionXPropertyIndex: positionXPropertyIndex,
@@ -242,10 +242,10 @@ private struct PointElementMapping {
                                    scaleYPropertyIndex: scaleYPropertyIndex,
                                    scaleZPropertyIndex: scaleZPropertyIndex,
                                    opacityPropertyIndex: opacityPropertyIndex,
-                                   rotationIPropertyIndex: rotationIPropertyIndex,
-                                   rotationJPropertyIndex: rotationJPropertyIndex,
-                                   rotationKPropertyIndex: rotationKPropertyIndex,
-                                   rotationWPropertyIndex: rotationWPropertyIndex)
+                                   rotation0PropertyIndex: rotation0PropertyIndex,
+                                   rotation1PropertyIndex: rotation1PropertyIndex,
+                                   rotation2PropertyIndex: rotation2PropertyIndex,
+                                   rotation3PropertyIndex: rotation3PropertyIndex)
     }
 
     func apply(from element: PLYElement, to result: inout SplatScenePoint) throws {
@@ -289,10 +289,10 @@ private struct PointElementMapping {
         result.scale.y = try element.float32Value(forPropertyIndex: scaleYPropertyIndex)
         result.scale.z = try element.float32Value(forPropertyIndex: scaleZPropertyIndex)
         result.opacity = try element.float32Value(forPropertyIndex: opacityPropertyIndex)
-        result.rotation.vector.x = try element.float32Value(forPropertyIndex: rotationIPropertyIndex)
-        result.rotation.vector.y = try element.float32Value(forPropertyIndex: rotationJPropertyIndex)
-        result.rotation.vector.z = try element.float32Value(forPropertyIndex: rotationKPropertyIndex)
-        result.rotation.vector.w = try element.float32Value(forPropertyIndex: rotationWPropertyIndex)
+        result.rotation.real   = try element.float32Value(forPropertyIndex: rotation0PropertyIndex)
+        result.rotation.imag.x = try element.float32Value(forPropertyIndex: rotation1PropertyIndex)
+        result.rotation.imag.y = try element.float32Value(forPropertyIndex: rotation2PropertyIndex)
+        result.rotation.imag.z = try element.float32Value(forPropertyIndex: rotation3PropertyIndex)
     }
 }
 

@@ -17,14 +17,12 @@ I'm putting this out there in case there are any brave curious souls that want t
 
 ### TODO / general shortcomings
 
-* Reduce precision to improve memory usage
-* Precompute the covariance matrix, to slightly reduce memory usage and time spent in the vertex shader
 * Spherical harmonics
 * Chunking up into multiple buffers for scalability past ~4m splats
-* Sorting on GPU. Sorting is currently done on the CPU asynchronously at a lower framerate (~10 fps), which increases how often you'll see pops especially when the viewpoint changes quickly
 * API documentation
 * Export in PLYIO, to help support editors
 * Import/export .splat
+* Sorting on GPU. Sorting is currently done on the CPU asynchronously at a lower framerate (~10 fps), which increases how often you'll see pops especially when the viewpoint changes quickly
 
 ## Documentation
 
