@@ -496,24 +496,6 @@ extension SplatRenderer.Splat {
                   rotation: rotation)
     }
 
-    static func quaternionToMatrix(quaternion: simd_quatf) -> simd_float3x3 {
-        var rotationMatrix = simd_float3x3()
-        let x = quaternion.imag.x
-        let y = quaternion.imag.y
-        let z = quaternion.imag.z
-        let w = quaternion.real
-        rotationMatrix[0, 0] = 1 - 2 * (z * z + w * w)
-        rotationMatrix[0, 1] = 2 * (y * z + x * w)
-        rotationMatrix[0, 2] = 2 * (y * w - x * z)
-        rotationMatrix[1, 0] = 2 * (y * z - x * w)
-        rotationMatrix[1, 1] = 1 - 2 * (y * y + w * w)
-        rotationMatrix[1, 2] = 2 * (z * w + x * y)
-        rotationMatrix[2, 0] = 2 * (y * w + x * z)
-        rotationMatrix[2, 1] = 2 * (z * w - x * y)
-        rotationMatrix[2, 2] = 1 - 2 * (y * y + z * z)
-        return rotationMatrix
-    }
-
     init(position: SIMD3<Float>,
          color: SIMD4<Float>,
          scale: SIMD3<Float>,
