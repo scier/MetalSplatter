@@ -10,23 +10,17 @@ This is a Swift/Metal library for rendering scenes captured via the techniques d
 * SampleApp, a mini app to demonstrate how to use the above (based on Apple template code) -- don't expect much, it's intentionally minimal, just an illustration
 * SampleBoxRenderer, a drop-in replacement for MetalSplatter for debugging integration, which just renders the cube from Apple Metal template
 
-## Minimal early version
+### TODO
 
-There are a lot of optimizations missing here, it's still very much a work in progress, but
-I'm putting this out there in case there are any brave curious souls that want to tinker with it.
-
-### TODO / general shortcomings
-
-* Spherical harmonics
-* Chunking up into multiple buffers for scalability past ~4m splats
+* Support spherical harmonics
 * API documentation
 * Export in PLYIO, to help support editors
 * Import/export .splat
-* Sorting on GPU. Sorting is currently done on the CPU asynchronously at a lower framerate (~10 fps), which increases how often you'll see pops especially when the viewpoint changes quickly
+* Explore possibilities for further performance optimizations. Mesh shaders? OIT? Who knows?
 
 ## Documentation
 
-You're right, the documentation is entirely missing. I mean, it's kinda embarrasing. Still, this was for fun and I'm gonna get to it eventually, after some of the higher-priority TODO items above. In the meantime, feel free to try out the sample app -- just, like I said, don't expect much.
+You're right, the documentation is entirely missing; it's a major TODO list item. In the meantime, feel free to try out the sample app -- just, like I said, don't expect much.
 
 1. Get yourself a gaussian splat PLY file.
    a. Maybe download the [scene data from the original paper](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) or [Polycam's gallery](https://poly.cam/tools/gaussian-splatting)
