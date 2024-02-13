@@ -41,28 +41,29 @@ typedef struct
     float4 color;
 } ColorInOut;
 
-float3 calcCovariance2D(float3 worldPos,
+float3 calcCovariance2D(float3 viewPos,
                         packed_half3 cov3Da,
                         packed_half3 cov3Db,
                         float4x4 viewMatrix,
                         float4x4 projectionMatrix,
                         uint2 screenSize) {
-    float3 viewPos = (viewMatrix * float4(worldPos, 1)).xyz;
+    float invViewPosZ = 1 / viewPos.z;
+    float invViewPosZSquared = invViewPosZ * invViewPosZ;
 
     float tanHalfFovX = 1 / projectionMatrix[0][0];
     float tanHalfFovY = 1 / projectionMatrix[1][1];
     float limX = 1.3 * tanHalfFovX;
     float limY = 1.3 * tanHalfFovY;
-    viewPos.x = clamp(viewPos.x / viewPos.z, -limX, limX) * viewPos.z;
-    viewPos.y = clamp(viewPos.y / viewPos.z, -limY, limY) * viewPos.z;
+    viewPos.x = clamp(viewPos.x * invViewPosZ, -limX, limX) * viewPos.z;
+    viewPos.y = clamp(viewPos.y * invViewPosZ, -limY, limY) * viewPos.z;
 
     float focalX = screenSize.x * projectionMatrix[0][0] / 2;
     float focalY = screenSize.y * projectionMatrix[1][1] / 2;
 
     float3x3 J = float3x3(
-        focalX / viewPos.z, 0, 0,
-        0, focalY / viewPos.z, 0,
-        -(focalX * viewPos.x) / (viewPos.z * viewPos.z), -(focalY * viewPos.y) / (viewPos.z * viewPos.z), 0
+        focalX * invViewPosZ, 0, 0,
+        0, focalY * invViewPosZ, 0,
+        -(focalX * viewPos.x) * invViewPosZSquared, -(focalY * viewPos.y) * invViewPosZSquared, 0
     );
     float3x3 W = float3x3(viewMatrix[0].xyz, viewMatrix[1].xyz, viewMatrix[2].xyz);
     float3x3 T = J * W;
@@ -71,7 +72,7 @@ float3 calcCovariance2D(float3 worldPos,
         cov3Da.y, cov3Db.x, cov3Db.y,
         cov3Da.z, cov3Db.y, cov3Db.z
     );
-    float3x3 cov = T * transpose(Vrk) * transpose(T);
+    float3x3 cov = T * Vrk * transpose(T);
 
     // Apply low-pass filter: every Gaussian should be at least
     // one pixel wide/high. Discard 3rd row and column.
@@ -127,16 +128,17 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
     Uniforms uniforms = uniformsArray.uniforms[min(int(amp_id), kMaxViewCount)];
 
     Splat splat = splatArray[orderArray[instanceID]];
+    float4 viewPosition4 = uniforms.viewMatrix * float4(splat.position, 1);
+    float3 viewPosition3 = viewPosition4.xyz;
 
-    float3 cov2D = calcCovariance2D(splat.position, splat.covA, splat.covB,
+    float3 cov2D = calcCovariance2D(viewPosition3, splat.covA, splat.covB,
                                     uniforms.viewMatrix, uniforms.projectionMatrix, uniforms.screenSize);
 
     float2 axis1;
     float2 axis2;
     decomposeCovariance(cov2D, axis1, axis2);
 
-    float4 eyeCenter = uniforms.viewMatrix * float4(splat.position, 1.0);
-    float4 projectedCenter = uniforms.projectionMatrix * eyeCenter;
+    float4 projectedCenter = uniforms.projectionMatrix * viewPosition4;
 
     float bounds = 1.2 * projectedCenter.w;
     if (projectedCenter.z < -projectedCenter.w ||
