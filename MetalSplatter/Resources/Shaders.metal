@@ -37,7 +37,7 @@ typedef struct
 typedef struct
 {
     float4 position [[position]];
-    float2 textureCoordinates;
+    float2 relativePosition; // Ranges from -kBoundsRadius to +kBoundsRadius
     float4 color;
 } ColorInOut;
 
@@ -146,7 +146,7 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
         projectedCenter.x > bounds ||
         projectedCenter.y < -bounds ||
         projectedCenter.y > bounds) {
-        out.position = float4(0, 0, 2, 1);
+        out.position = float4(1, 1, 1, 0);
         return out;
     }
 
@@ -169,19 +169,19 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
     float2 screenVertex = screenCenter + screenDelta;
 
     out.position = float4(screenVertex.x, screenVertex.y, 0, 1);
-    out.textureCoordinates = textureCoordinates;
+    out.relativePosition = kBoundsRadius * float2(textureCoordinates.x * 2 - 1, textureCoordinates.y * 2 - 1);
     out.color = float4(splat.color);
     return out;
 }
 
 fragment float4 splatFragmentShader(ColorInOut in [[stage_in]]) {
-    float2 v = kBoundsRadius * float2(in.textureCoordinates.x * 2 - 1, in.textureCoordinates.y * 2 - 1);
+    float2 v = in.relativePosition;
     float negativeVSquared = -dot(v, v);
     if (negativeVSquared < -kBoundsRadiusSquared) {
         discard_fragment();
     }
 
-    float alpha = saturate(exp(negativeVSquared)) * in.color.a;
+    float alpha = exp(negativeVSquared) * in.color.a;
     return float4(alpha * in.color.rgb, alpha);
 }
 
