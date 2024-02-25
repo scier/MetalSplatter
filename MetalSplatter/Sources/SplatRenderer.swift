@@ -5,7 +5,7 @@ import MetalKit
 import SplatIO
 
 #if arch(x86_64)
-typealias Float16 = Float
+typealias Float16 = BCFloat16
 #warning("x86_64 targets are unsupported by MetalSplatter and will fail at runtime. MetalSplatter builds on x86_64 only because Xcode builds Swift Packages as universal binaries and provides no way to override this. When Swift supports Float16 on x86_64, this may be revisited.")
 #endif
 
@@ -152,9 +152,9 @@ public class SplatRenderer {
                 sampleCount: Int,
                 maxViewCount: Int,
                 maxSimultaneousRenders: Int) throws {
-#if arch(x86_64)
-        fatalError("MetalSplatter is unsupported on Intel architecture (x86_64)")
-#endif
+//#if arch(x86_64)
+//        fatalError("MetalSplatter is unsupported on Intel architecture (x86_64)")
+//#endif
 
         self.maxViewCount = min(maxViewCount, Constants.maxViewCount)
         self.maxSimultaneousRenders = maxSimultaneousRenders
