@@ -450,15 +450,23 @@ public class SplatRenderer {
                 onSortComplete?(-sortStartTime.timeIntervalSinceNow)
             }
 
-            // We maintain the old order in indicesAndDepthTempSort in order to provide the opportunity to optimize the sort performance
-            for i in 0..<splatCount {
-                let index = orderAndDepthTempSort[i].index
-                let splatPosition = splatBuffer.values[Int(index)].position
-                let splatPositionUnpacked = SIMD3<Float>(splatPosition.x, splatPosition.y, splatPosition.z)
-                if Constants.sortByDistance {
-                    orderAndDepthTempSort[i].depth = (splatPositionUnpacked - cameraWorldPosition).lengthSquared
-                } else {
-                    orderAndDepthTempSort[i].depth = dot(splatPositionUnpacked, cameraWorldForward)
+            if Constants.sortByDistance {
+                for i in 0..<splatCount {
+                    let index = orderAndDepthTempSort[i].index
+                    let splatPosition = splatBuffer.values[Int(index)].position
+                    let dx = splatPosition.x - cameraWorldPosition.x
+                    let dy = splatPosition.y - cameraWorldPosition.y
+                    let dz = splatPosition.z - cameraWorldPosition.z
+                    orderAndDepthTempSort[i].depth = dx*dx + dy*dy + dz*dz // (splatPosition - cameraWorldPosition).lengthSquared
+                }
+            } else {
+                for i in 0..<splatCount {
+                    let index = orderAndDepthTempSort[i].index
+                    let splatPosition = splatBuffer.values[Int(index)].position
+                    let xx = splatPosition.x * cameraWorldForward.x
+                    let yy = splatPosition.y * cameraWorldForward.y
+                    let zz = splatPosition.z * cameraWorldForward.z
+                    orderAndDepthTempSort[i].depth = xx + yy + zz // splatPosition dot cameraWorldForward
                 }
             }
 
