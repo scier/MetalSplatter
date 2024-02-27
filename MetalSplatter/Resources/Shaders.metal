@@ -4,8 +4,8 @@
 using namespace metal;
 
 constant const int kMaxViewCount = 2;
-constant static const float kBoundsRadius = 2;
-constant static const float kBoundsRadiusSquared = kBoundsRadius*kBoundsRadius;
+constant static const half kBoundsRadius = 2;
+constant static const half kBoundsRadiusSquared = kBoundsRadius*kBoundsRadius;
 
 enum BufferIndex: int32_t
 {
@@ -36,8 +36,8 @@ typedef struct
 typedef struct
 {
     float4 position [[position]];
-    float2 relativePosition; // Ranges from -kBoundsRadius to +kBoundsRadius
-    float4 color;
+    half2 relativePosition; // Ranges from -kBoundsRadius to +kBoundsRadius
+    half4 color;
 } ColorInOut;
 
 float3 calcCovariance2D(float3 viewPos,
@@ -148,38 +148,41 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
         return out;
     }
 
-    float2 textureCoordinates;
+    half2 vertexRelativePosition;
     switch (vertexID % 4) {
-        case 0: textureCoordinates = float2(0, 0); break;
-        case 1: textureCoordinates = float2(0, 1); break;
-        case 2: textureCoordinates = float2(1, 0); break;
-        case 3: textureCoordinates = float2(1, 1); break;
+        case 0:
+            vertexRelativePosition = half2(-1, -1); break;
+        case 1:
+            vertexRelativePosition = half2(-1,  1); break;
+        case 2:
+            vertexRelativePosition = half2( 1, -1); break;
+        case 3:
+            vertexRelativePosition = half2( 1,  1); break;
     }
-    float2 vertexRelativePosition = float2((textureCoordinates.x - 0.5) * 2, (textureCoordinates.y - 0.5) * 2);
-    float2 screenCenter = projectedCenter.xy / projectedCenter.w;
-    float2 screenSizeFloat = float2(uniforms.screenSize.x, uniforms.screenSize.y);
-    float2 screenDelta =
-        (vertexRelativePosition.x * axis1 +
-         vertexRelativePosition.y * axis2)
+    half2 screenCenter = half2(projectedCenter.xy / projectedCenter.w);
+    half2 screenSizeFloat = half2(uniforms.screenSize.x, uniforms.screenSize.y);
+    half2 screenDelta =
+        (vertexRelativePosition.x * half2(axis1) +
+         vertexRelativePosition.y * half2(axis2))
         * 2
         * kBoundsRadius
         / screenSizeFloat;
-    float2 screenVertex = screenCenter + screenDelta;
+    half2 screenVertex = screenCenter + screenDelta;
 
     out.position = float4(screenVertex.x, screenVertex.y, 0, 1);
-    out.relativePosition = kBoundsRadius * float2(textureCoordinates.x * 2 - 1, textureCoordinates.y * 2 - 1);
-    out.color = float4(splat.color);
+    out.relativePosition = kBoundsRadius * vertexRelativePosition;
+    out.color = half4(splat.color);
     return out;
 }
 
-fragment float4 splatFragmentShader(ColorInOut in [[stage_in]]) {
-    float2 v = in.relativePosition;
-    float negativeVSquared = -dot(v, v);
+fragment half4 splatFragmentShader(ColorInOut in [[stage_in]]) {
+    half2 v = in.relativePosition;
+    half negativeVSquared = -dot(v, v);
     if (negativeVSquared < -kBoundsRadiusSquared) {
         discard_fragment();
     }
 
-    float alpha = exp(negativeVSquared) * in.color.a;
-    return float4(alpha * in.color.rgb, alpha);
+    half alpha = exp(negativeVSquared) * in.color.a;
+    return half4(alpha * in.color.rgb, alpha);
 }
 
