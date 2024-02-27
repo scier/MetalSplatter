@@ -43,10 +43,18 @@ public class SplatRenderer {
         }
     }
 
-    // Keep in sync with Shaders.metal : BufferIndex
-    enum BufferIndex: NSInteger {
+    // Keep in sync with Shaders.metal : PreprocessBufferIndex
+    enum PreprocessBufferIndex: NSInteger {
         case uniforms = 0
         case splat    = 1
+        case preprocessedSplat = 2
+    }
+
+    // Keep in sync with Shaders.metal : VertexBufferIndex
+    enum VertexBufferIndex: NSInteger {
+        case uniforms = 0
+        case splat    = 1
+        case preprocessedSplat = 2
     }
 
     // Keep in sync with Shaders.metal : Uniforms
@@ -97,6 +105,12 @@ public class SplatRenderer {
         var covB: PackedHalf3
     }
 
+    // Keep in sync with Shaders.metal : PreprocessedSplat
+    struct PreprocessedSplat {
+        var scaledAxis1: SIMD2<Float16>
+        var scaledAxis2: SIMD2<Float16>
+    }
+
     struct SplatIndexAndDepth {
         var index: UInt32
         var depth: Float
@@ -132,6 +146,7 @@ public class SplatRenderer {
     public var onSortComplete: ((TimeInterval) -> Void)?
 
     private let library: MTLLibrary
+    private var preprocessPipelineState: MTLComputePipelineState?
     private var renderPipelineState: MTLRenderPipelineState?
     private var depthState: MTLDepthStencilState?
 
@@ -148,7 +163,7 @@ public class SplatRenderer {
     var cameraWorldForward: SIMD3<Float> = .init(x: 0, y: 0, z: -1)
 
     typealias IndexType = UInt32
-    // splatBuffer contains one entry for each gaussian splat
+    // splatBuffer and preprocessedSplatBuffer contain one entry for each gaussian splat
     var splatBuffer: MetalBuffer<Splat>
     // splatBufferPrime is a copy of splatBuffer, which is not currenly in use for rendering.
     // We use this for sorting, and when we're done, swap it with splatBuffer.
@@ -156,6 +171,7 @@ public class SplatRenderer {
     // rendering.
     // TODO: Replace this with a more robust multiple-buffer scheme to guarantee we're never actively sorting a buffer still in use for rendering
     var splatBufferPrime: MetalBuffer<Splat>
+    var preprocessedSplatBuffer: MetalBuffer<PreprocessedSplat>
 
     var indexBuffer: MetalBuffer<UInt32>
 
@@ -192,6 +208,7 @@ public class SplatRenderer {
 
         self.splatBuffer = try MetalBuffer(device: device)
         self.splatBufferPrime = try MetalBuffer(device: device)
+        self.preprocessedSplatBuffer = try MetalBuffer(device: device)
         self.indexBuffer = try MetalBuffer(device: device)
 
         do {
@@ -204,6 +221,8 @@ public class SplatRenderer {
     public func reset() {
         splatBuffer.count = 0
         try? splatBuffer.setCapacity(0)
+        preprocessedSplatBuffer.count = 0
+        try? preprocessedSplatBuffer.setCapacity(0)
     }
 
     public func read(from url: URL) async throws {
@@ -213,17 +232,25 @@ public class SplatRenderer {
     }
 
     private func resetPipelines() {
+        preprocessPipelineState = nil
         renderPipelineState = nil
         depthState = nil
     }
 
     private func buildPipelinesIfNeeded() throws {
+        if preprocessPipelineState == nil {
+            preprocessPipelineState = try buildPreprocessPipeline()
+        }
         if renderPipelineState == nil {
             renderPipelineState = try buildRenderPipeline()
         }
         if depthState == nil {
             depthState = try buildDepthState()
         }
+    }
+
+    private func buildPreprocessPipeline() throws -> MTLComputePipelineState {
+        try device.makeComputePipelineState(function: library.makeRequiredFunction(name: "splatPreprocessShader"))
     }
 
     private func buildRenderPipeline() throws -> MTLRenderPipelineState {
@@ -270,6 +297,7 @@ public class SplatRenderer {
 
     public func ensureAdditionalCapacity(_ pointCount: Int) throws {
         try splatBuffer.ensureCapacity(splatBuffer.count + pointCount)
+        try preprocessedSplatBuffer.ensureCapacity(splatBuffer.count + pointCount)
     }
 
     public func add(_ points: [SplatScenePoint]) throws {
@@ -281,6 +309,8 @@ public class SplatRenderer {
         }
 
         splatBuffer.append(points.map { Splat($0) })
+        preprocessedSplatBuffer.append(Array(repeating: PreprocessedSplat(scaledAxis1: .init(x: 0, y: 0), scaledAxis2: .init(x: 0, y: 0)),
+                                             count: points.count))
     }
 
     public func add(_ point: SplatScenePoint) throws {
@@ -385,7 +415,21 @@ public class SplatRenderer {
         updateUniforms(forViewports: viewports, splatCount: UInt32(splatCount), indexedSplatCount: UInt32(indexedSplatCount))
 
         try? buildPipelinesIfNeeded()
-        guard let renderPipelineState, let depthState else { return }
+        guard let preprocessPipelineState, let renderPipelineState, let depthState else { return }
+
+        let preprocessEncoder = commandBuffer.makeComputeCommandEncoder()!
+        preprocessEncoder.setComputePipelineState(preprocessPipelineState)
+        preprocessEncoder.setBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: PreprocessBufferIndex.uniforms.rawValue)
+        preprocessEncoder.setBuffer(splatBuffer.buffer, offset: 0, index: PreprocessBufferIndex.splat.rawValue)
+        preprocessEncoder.setBuffer(preprocessedSplatBuffer.buffer, offset: 0, index: PreprocessBufferIndex.preprocessedSplat.rawValue)
+        if device.supportsFamily(.common3) {
+            preprocessEncoder.dispatchThreads(MTLSize(width: splatCount, height: 1, depth: 1),
+                                              threadsPerThreadgroup: MTLSize(width: preprocessPipelineState.maxTotalThreadsPerThreadgroup, height: 1, depth: 1))
+        } else {
+            preprocessEncoder.dispatchThreadgroups(MTLSize(width: splatCount, height: 1, depth: 1),
+                                                   threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
+        }
+        preprocessEncoder.endEncoding()
 
         let renderEncoder = renderEncoder(viewports: viewports,
                                           colorTexture: colorTexture,
@@ -419,8 +463,9 @@ public class SplatRenderer {
         renderEncoder.setRenderPipelineState(renderPipelineState)
         renderEncoder.setDepthStencilState(depthState)
 
-        renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-        renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: BufferIndex.splat.rawValue)
+        renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: VertexBufferIndex.uniforms.rawValue)
+        renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: VertexBufferIndex.splat.rawValue)
+        renderEncoder.setVertexBuffer(preprocessedSplatBuffer.buffer, offset: 0, index: VertexBufferIndex.preprocessedSplat.rawValue)
 
         renderEncoder.drawIndexedPrimitives(type: .triangle,
                                             indexCount: indexCount,

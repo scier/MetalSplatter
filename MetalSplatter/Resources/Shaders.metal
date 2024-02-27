@@ -7,10 +7,18 @@ constant const int kMaxViewCount = 2;
 constant static const half kBoundsRadius = 3;
 constant static const half kBoundsRadiusSquared = kBoundsRadius*kBoundsRadius;
 
-enum BufferIndex: int32_t
+enum PreprocessBufferIndex: int32_t
 {
-    BufferIndexUniforms = 0,
-    BufferIndexSplat    = 1,
+    PreprocessBufferIndexUniforms = 0,
+    PreprocessBufferIndexSplat    = 1,
+    PreprocessBufferIndexPreprocessedSplat = 2,
+};
+
+enum VertexBufferIndex: int32_t
+{
+    VertexBufferIndexUniforms = 0,
+    VertexBufferIndexSplat    = 1,
+    VertexBufferIndexPreprocessedSplat = 2,
 };
 
 typedef struct
@@ -40,6 +48,12 @@ typedef struct
     packed_half3 covA;
     packed_half3 covB;
 } Splat;
+
+typedef struct
+{
+    half2 scaledAxis1;
+    half2 scaledAxis2;
+} PreprocessedSplat;
 
 typedef struct
 {
@@ -121,14 +135,41 @@ void decomposeCovariance(float3 cov2D, thread float2 &v1, thread float2 &v2) {
     v2 = eigenvector2 * sqrt(lambda2);
 }
 
-vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
+kernel void splatPreprocessShader(constant UniformsArray& uniformsArray [[ buffer(PreprocessBufferIndexUniforms) ]],
+                                  constant Splat* splatArray [[ buffer(PreprocessBufferIndexSplat) ]],
+                                  device PreprocessedSplat* preprocessedSplatArray [[ buffer(PreprocessBufferIndexPreprocessedSplat) ]],
+                                  uint splatID [[thread_position_in_grid]]) {
+    const uint uniformID = 0;
+    Uniforms uniforms = uniformsArray.uniforms[min(int(uniformID), kMaxViewCount)];
+
+    Splat splat = splatArray[splatID];
+    float3 viewPosition = (uniforms.viewMatrix * float4(splat.position, 1)).xyz;
+
+    float3 cov2D = calcCovariance2D(viewPosition, splat.covA, splat.covB,
+                                    uniforms.viewMatrix, uniforms.projectionMatrix, uniforms.screenSize);
+
+    float2 axis1;
+    float2 axis2;
+    decomposeCovariance(cov2D, axis1, axis2);
+
+    half2 axisScale = half2(2 * kBoundsRadius / uniforms.screenSize.x,
+                            2 * kBoundsRadius / uniforms.screenSize.y);
+    PreprocessedSplat result;
+    result.scaledAxis1 = half2(axis1) * axisScale;
+    result.scaledAxis2 = half2(axis2) * axisScale;
+
+    preprocessedSplatArray[splatID] = result;
+}
+
+vertex ColorInOut splatVertexShader(constant UniformsArray& uniformsArray [[ buffer(VertexBufferIndexUniforms) ]],
+                                    constant Splat* splatArray [[ buffer(VertexBufferIndexSplat) ]],
+                                    constant PreprocessedSplat* preprocessedSplatArray [[ buffer(VertexBufferIndexPreprocessedSplat) ]],
+                                    uint vertexID [[vertex_id]],
                                     uint instanceID [[instance_id]],
-                                    ushort amp_id [[amplification_id]],
-                                    constant Splat* splatArray [[ buffer(BufferIndexSplat) ]],
-                                    constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]]) {
+                                    ushort amplificationID [[amplification_id]]) {
     ColorInOut out;
 
-    Uniforms uniforms = uniformsArray.uniforms[min(int(amp_id), kMaxViewCount)];
+    Uniforms uniforms = uniformsArray.uniforms[min(int(amplificationID), kMaxViewCount)];
 
     uint splatID = instanceID * uniforms.indexedSplatCount + (vertexID / 4);
     if (splatID >= uniforms.splatCount) {
@@ -137,17 +178,8 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
     }
 
     Splat splat = splatArray[splatID];
-    float4 viewPosition4 = uniforms.viewMatrix * float4(splat.position, 1);
-    float3 viewPosition3 = viewPosition4.xyz;
-
-    float3 cov2D = calcCovariance2D(viewPosition3, splat.covA, splat.covB,
-                                    uniforms.viewMatrix, uniforms.projectionMatrix, uniforms.screenSize);
-
-    float2 axis1;
-    float2 axis2;
-    decomposeCovariance(cov2D, axis1, axis2);
-
-    float4 projectedCenter = uniforms.projectionMatrix * viewPosition4;
+    PreprocessedSplat preprocessedSplat = preprocessedSplatArray[splatID];
+    float4 projectedCenter = uniforms.projectionMatrix * uniforms.viewMatrix * float4(splat.position, 1);
 
     float bounds = 1.2 * projectedCenter.w;
     if (projectedCenter.z < -projectedCenter.w ||
@@ -161,13 +193,7 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
 
     const half2 relativeCoordinatesArray[] = { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } };
     half2 relativeCoordinates = relativeCoordinatesArray[vertexID % 4];
-    half2 screenSizeFloat = half2(uniforms.screenSize.x, uniforms.screenSize.y);
-    half2 projectedScreenDelta =
-        (relativeCoordinates.x * half2(axis1) + relativeCoordinates.y * half2(axis2))
-        * 2
-        * kBoundsRadius
-        / screenSizeFloat;
-
+    half2 projectedScreenDelta = relativeCoordinates.x * preprocessedSplat.scaledAxis1 + relativeCoordinates.y * preprocessedSplat.scaledAxis2;
     out.position = float4(projectedCenter.x + projectedScreenDelta.x * projectedCenter.w,
                           projectedCenter.y + projectedScreenDelta.y * projectedCenter.w,
                           projectedCenter.z,
