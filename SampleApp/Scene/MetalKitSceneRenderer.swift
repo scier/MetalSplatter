@@ -30,8 +30,6 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         metalKitView.colorPixelFormat = MTLPixelFormat.bgra8Unorm_srgb
         metalKitView.depthStencilPixelFormat = MTLPixelFormat.depth32Float_stencil8
         metalKitView.sampleCount = 1
-        // This is required because we render front-to-back (see SplatRenderer.Constants.renderFrontToBack).
-        // If we rendered back-to-front, alpha wouldn't need to start as zero.
         metalKitView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
     }
 
@@ -64,7 +62,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    private var viewportCamera: ModelRenderer.CameraMatrices {
+    private var viewport: ModelRendererViewportDescriptor {
         let projectionMatrix = matrix_perspective_right_hand(fovyRadians: Float(Constants.fovy.radians),
                                                              aspectRatio: Float(drawableSize.width / drawableSize.height),
                                                              nearZ: 0.1,
@@ -77,9 +75,12 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         // happens to be a useful default for the most common datasets at the moment.
         let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
 
-        return (projection: projectionMatrix,
-                view: translationMatrix * rotationMatrix * commonUpCalibration,
-                screenSize: SIMD2(x: Int(drawableSize.width), y: Int(drawableSize.height)))
+        let viewport = MTLViewport(originX: 0, originY: 0, width: drawableSize.width, height: drawableSize.height, znear: 0, zfar: 1)
+
+        return ModelRendererViewportDescriptor(viewport: viewport,
+                                               projectionMatrix: projectionMatrix,
+                                               viewMatrix: translationMatrix * rotationMatrix * commonUpCalibration,
+                                               screenSize: SIMD2(x: Int(drawableSize.width), y: Int(drawableSize.height)))
     }
 
     private func updateRotation() {
@@ -94,6 +95,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         guard let modelRenderer else { return }
+        guard let drawable = view.currentDrawable else { return }
 
         _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
 
@@ -109,21 +111,16 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
         updateRotation()
 
-        modelRenderer.willRender(viewportCameras: [viewportCamera])
+        modelRenderer.render(viewports: [viewport],
+                             colorTexture: view.multisampleColorTexture ?? drawable.texture,
+                             colorStoreAction: view.multisampleColorTexture == nil ? .store : .multisampleResolve,
+                             depthTexture: view.depthStencilTexture,
+                             stencilTexture: view.depthStencilTexture,
+                             rasterizationRateMap: nil,
+                             renderTargetArrayLength: 0,
+                             to: commandBuffer)
 
-        let renderPassDescriptor = view.currentRenderPassDescriptor
-
-        if let renderPassDescriptor = renderPassDescriptor,
-           let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) {
-
-            modelRenderer.render(viewportCameras: [viewportCamera], to: renderEncoder)
-
-            renderEncoder.endEncoding()
-
-            if let drawable = view.currentDrawable {
-                commandBuffer.present(drawable)
-            }
-        }
+        commandBuffer.present(drawable)
 
         commandBuffer.commit()
     }

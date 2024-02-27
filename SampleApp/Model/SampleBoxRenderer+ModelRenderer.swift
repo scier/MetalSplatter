@@ -2,15 +2,27 @@ import Metal
 import SampleBoxRenderer
 
 extension SampleBoxRenderer: ModelRenderer {
-    public func willRender(viewportCameras: [CameraMatrices]) {
-        willRender(viewportCameras: viewportCameras.map {
-            CameraDescriptor(projectionMatrix: $0.projection, viewMatrix: $0.view, screenSize: $0.screenSize)
-        })
-    }
-
-    public func render(viewportCameras: [CameraMatrices], to renderEncoder: MTLRenderCommandEncoder) {
-        render(viewportCameras: viewportCameras.map {
-            CameraDescriptor(projectionMatrix: $0.projection, viewMatrix: $0.view, screenSize: $0.screenSize)
-        }, to: renderEncoder)
+    public func render(viewports: [ModelRendererViewportDescriptor],
+                       colorTexture: MTLTexture,
+                       colorStoreAction: MTLStoreAction,
+                       depthTexture: MTLTexture?,
+                       stencilTexture: MTLTexture?,
+                       rasterizationRateMap: MTLRasterizationRateMap?,
+                       renderTargetArrayLength: Int,
+                       to commandBuffer: MTLCommandBuffer) {
+        let remappedViewports = viewports.map { viewport -> ViewportDescriptor in
+            ViewportDescriptor(viewport: viewport.viewport,
+                               projectionMatrix: viewport.projectionMatrix,
+                               viewMatrix: viewport.viewMatrix,
+                               screenSize: viewport.screenSize)
+        }
+        render(viewports: remappedViewports,
+               colorTexture: colorTexture,
+               colorStoreAction: colorStoreAction,
+               depthTexture: depthTexture,
+               stencilTexture: stencilTexture,
+               rasterizationRateMap: rasterizationRateMap,
+               renderTargetArrayLength: renderTargetArrayLength,
+               to: commandBuffer)
     }
 }

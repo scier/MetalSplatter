@@ -19,19 +19,20 @@ public class SplatRenderer {
         static let sortByDistance = true
         // TODO: compare the performance of useAccelerateForSort, both for small and large scenes
         static let useAccelerateForSort = false
-        static let renderFrontToBack = true
     }
 
     private static let log =
         Logger(subsystem: Bundle.module.bundleIdentifier!,
                category: "SplatRenderer")
 
-    public struct CameraDescriptor {
+    public struct ViewportDescriptor {
+        public var viewport: MTLViewport
         public var projectionMatrix: simd_float4x4
         public var viewMatrix: simd_float4x4
         public var screenSize: SIMD2<Int>
 
-        public init(projectionMatrix: simd_float4x4, viewMatrix: simd_float4x4, screenSize: SIMD2<Int>) {
+        public init(viewport: MTLViewport, projectionMatrix: simd_float4x4, viewMatrix: simd_float4x4, screenSize: SIMD2<Int>) {
+            self.viewport = viewport
             self.projectionMatrix = projectionMatrix
             self.viewMatrix = viewMatrix
             self.screenSize = screenSize
@@ -83,7 +84,7 @@ public class SplatRenderer {
         var a: Float16
     }
 
-    // Keep in sync with Shaders.metal : Vertex
+    // Keep in sync with Shaders.metal : Splat
     struct Splat {
         var position: MTLPackedFloat3
         var color: PackedRGBHalf4
@@ -96,13 +97,36 @@ public class SplatRenderer {
         var depth: Float
     }
 
-    var pipelineState: MTLRenderPipelineState
-    var depthState: MTLDepthStencilState
+    public let device: MTLDevice
+    public let colorFormat: MTLPixelFormat
+    public let depthFormat: MTLPixelFormat
+    public let stencilFormat: MTLPixelFormat
+    public let sampleCount: Int
     public let maxViewCount: Int
     public let maxSimultaneousRenders: Int
 
+    public var storeDepth: Bool = false {
+        didSet {
+            if storeDepth != oldValue {
+                resetPipelines()
+            }
+        }
+    }
+
+    public var renderFrontToBack: Bool = false {
+        didSet {
+            if renderFrontToBack != oldValue {
+                resetPipelines()
+            }
+        }
+    }
+
     public var onSortStart: (() -> Void)?
     public var onSortComplete: ((TimeInterval) -> Void)?
+
+    private let library: MTLLibrary
+    private var renderPipelineState: MTLRenderPipelineState?
+    private var depthState: MTLDepthStencilState?
 
     // dynamicUniformBuffers contains maxSimultaneousRenders uniforms buffers,
     // which we round-robin through, one per render; this is managed by switchToNextDynamicBuffer.
@@ -156,6 +180,12 @@ public class SplatRenderer {
         fatalError("MetalSplatter is unsupported on Intel architecture (x86_64)")
 #endif
 
+        self.device = device
+
+        self.colorFormat = colorFormat
+        self.depthFormat = depthFormat
+        self.stencilFormat = stencilFormat
+        self.sampleCount = sampleCount
         self.maxViewCount = min(maxViewCount, Constants.maxViewCount)
         self.maxSimultaneousRenders = maxSimultaneousRenders
 
@@ -172,20 +202,10 @@ public class SplatRenderer {
         self.depthBufferTempSort = try MetalBuffer(device: device)
 
         do {
-            pipelineState = try Self.buildRenderPipelineWithDevice(device: device,
-                                                                   colorFormat: colorFormat,
-                                                                   depthFormat: depthFormat,
-                                                                   stencilFormat: stencilFormat,
-                                                                   sampleCount: sampleCount,
-                                                                   maxViewCount: self.maxViewCount)
+            library = try device.makeDefaultLibrary(bundle: Bundle.module)
         } catch {
-            fatalError("Unable to compile render pipeline state.  Error info: \(error)")
+            fatalError("Unable to initialize SplatRenderer: \(error)")
         }
-
-        let depthStateDescriptor = MTLDepthStencilDescriptor()
-        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.lessEqual
-        depthStateDescriptor.isDepthWriteEnabled = false
-        self.depthState = device.makeDepthStencilState(descriptor:depthStateDescriptor)!
     }
 
     public func reset() {
@@ -206,21 +226,26 @@ public class SplatRenderer {
         }
     }
 
-    private class func buildRenderPipelineWithDevice(device: MTLDevice,
-                                                     colorFormat: MTLPixelFormat,
-                                                     depthFormat: MTLPixelFormat,
-                                                     stencilFormat: MTLPixelFormat,
-                                                     sampleCount: Int,
-                                                     maxViewCount: Int) throws -> MTLRenderPipelineState {
-        let library = try device.makeDefaultLibrary(bundle: Bundle.module)
+    private func resetPipelines() {
+        renderPipelineState = nil
+        depthState = nil
+    }
 
-        let vertexFunction = library.makeFunction(name: "splatVertexShader")
-        let fragmentFunction = library.makeFunction(name: "splatFragmentShader")
+    private func buildPipelinesIfNeeded() throws {
+        if renderPipelineState == nil {
+            renderPipelineState = try buildRenderPipeline()
+        }
+        if depthState == nil {
+            depthState = try buildDepthState()
+        }
+    }
 
+    private func buildRenderPipeline() throws -> MTLRenderPipelineState {
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
+
         pipelineDescriptor.label = "RenderPipeline"
-        pipelineDescriptor.vertexFunction = vertexFunction
-        pipelineDescriptor.fragmentFunction = fragmentFunction
+        pipelineDescriptor.vertexFunction = library.makeRequiredFunction(name: "splatVertexShader")
+        pipelineDescriptor.fragmentFunction = library.makeRequiredFunction(name: "splatFragmentShader")
 
         pipelineDescriptor.rasterSampleCount = sampleCount
 
@@ -229,7 +254,7 @@ public class SplatRenderer {
         colorAttachment.isBlendingEnabled = true
         colorAttachment.rgbBlendOperation = .add
         colorAttachment.alphaBlendOperation = .add
-        if Constants.renderFrontToBack {
+        if renderFrontToBack {
             colorAttachment.sourceRGBBlendFactor = .oneMinusDestinationAlpha
             colorAttachment.sourceAlphaBlendFactor = .oneMinusDestinationAlpha
             colorAttachment.destinationRGBBlendFactor = .one
@@ -250,6 +275,13 @@ public class SplatRenderer {
         return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
     }
 
+    private func buildDepthState() throws -> MTLDepthStencilState {
+        let depthStateDescriptor = MTLDepthStencilDescriptor()
+        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.always
+        depthStateDescriptor.isDepthWriteEnabled = storeDepth
+        return device.makeDepthStencilState(descriptor: depthStateDescriptor)!
+    }
+
     public func ensureAdditionalCapacity(_ pointCount: Int) throws {
         try splatBuffer.ensureCapacity(splatBuffer.count + pointCount)
     }
@@ -265,24 +297,22 @@ public class SplatRenderer {
         splatBuffer.append([ Splat(point) ])
     }
 
-    public func willRender(viewportCameras: [CameraDescriptor]) {}
-
     private func switchToNextDynamicBuffer() {
         uniformBufferIndex = (uniformBufferIndex + 1) % maxSimultaneousRenders
         uniformBufferOffset = UniformsArray.alignedSize * uniformBufferIndex
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffers.contents() + uniformBufferOffset).bindMemory(to: UniformsArray.self, capacity: 1)
     }
 
-    private func updateUniforms(forViewportCameras viewportCameras: [CameraDescriptor]) {
-        for (i, viewportCamera) in viewportCameras.enumerated() where i <= maxViewCount {
-            let uniforms = Uniforms(projectionMatrix: viewportCamera.projectionMatrix,
-                                    viewMatrix: viewportCamera.viewMatrix,
-                                    screenSize: SIMD2(x: UInt32(viewportCamera.screenSize.x), y: UInt32(viewportCamera.screenSize.y)))
+    private func updateUniforms(forViewports viewports: [ViewportDescriptor]) {
+        for (i, viewport) in viewports.enumerated() where i <= maxViewCount {
+            let uniforms = Uniforms(projectionMatrix: viewport.projectionMatrix,
+                                    viewMatrix: viewport.viewMatrix,
+                                    screenSize: SIMD2(x: UInt32(viewport.screenSize.x), y: UInt32(viewport.screenSize.y)))
             self.uniforms.pointee.setUniforms(index: i, uniforms)
         }
 
-        cameraWorldPosition = viewportCameras.map { Self.cameraWorldPosition(forViewMatrix: $0.viewMatrix) }.mean ?? .zero
-        cameraWorldForward = viewportCameras.map { Self.cameraWorldForward(forViewMatrix: $0.viewMatrix) }.mean?.normalized ?? .init(x: 0, y: 0, z: -1)
+        cameraWorldPosition = viewports.map { Self.cameraWorldPosition(forViewMatrix: $0.viewMatrix) }.mean ?? .zero
+        cameraWorldForward = viewports.map { Self.cameraWorldForward(forViewMatrix: $0.viewMatrix) }.mean?.normalized ?? .init(x: 0, y: 0, z: -1)
 
         if !sorting {
             resortIndices()
@@ -297,16 +327,81 @@ public class SplatRenderer {
         (view.inverse * SIMD4<Float>(x: 0, y: 0, z: 0, w: 1)).xyz
     }
 
-    public func render(viewportCameras: [CameraDescriptor], to renderEncoder: MTLRenderCommandEncoder) {
+    func renderEncoder(viewports: [ViewportDescriptor],
+                       colorTexture: MTLTexture,
+                       colorStoreAction: MTLStoreAction,
+                       depthTexture: MTLTexture?,
+                       stencilTexture: MTLTexture?,
+                       rasterizationRateMap: MTLRasterizationRateMap?,
+                       renderTargetArrayLength: Int,
+                       for commandBuffer: MTLCommandBuffer) -> MTLRenderCommandEncoder {
+        let renderPassDescriptor = MTLRenderPassDescriptor()
+        renderPassDescriptor.colorAttachments[0].texture = colorTexture
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        renderPassDescriptor.colorAttachments[0].storeAction = colorStoreAction
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
+        if let depthTexture {
+            renderPassDescriptor.depthAttachment.texture = depthTexture
+            renderPassDescriptor.depthAttachment.loadAction = .clear
+            renderPassDescriptor.depthAttachment.storeAction = storeDepth ? .store : .dontCare
+            renderPassDescriptor.depthAttachment.clearDepth = 1.0
+        }
+        if let stencilTexture {
+            renderPassDescriptor.stencilAttachment.texture = stencilTexture
+            renderPassDescriptor.stencilAttachment.loadAction = .clear
+            renderPassDescriptor.stencilAttachment.storeAction = .dontCare
+            renderPassDescriptor.stencilAttachment.clearStencil = 0
+        }
+        renderPassDescriptor.rasterizationRateMap = rasterizationRateMap
+        renderPassDescriptor.renderTargetArrayLength = renderTargetArrayLength
+
+        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+            fatalError("Failed to create render encoder")
+        }
+
+        renderEncoder.label = "Primary Render Encoder"
+
+        renderEncoder.setViewports(viewports.map(\.viewport))
+
+        if viewports.count > 1 {
+            var viewMappings = (0..<viewports.count).map {
+                MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
+                                                  renderTargetArrayIndexOffset: UInt32($0))
+            }
+            renderEncoder.setVertexAmplificationCount(viewports.count, viewMappings: &viewMappings)
+        }
+
+        return renderEncoder
+    }
+
+    public func render(viewports: [ViewportDescriptor],
+                       colorTexture: MTLTexture,
+                       colorStoreAction: MTLStoreAction,
+                       depthTexture: MTLTexture?,
+                       stencilTexture: MTLTexture?,
+                       rasterizationRateMap: MTLRasterizationRateMap?,
+                       renderTargetArrayLength: Int,
+                       to commandBuffer: MTLCommandBuffer) {
         guard splatBuffer.count != 0 else { return }
 
         switchToNextDynamicBuffer()
-        updateUniforms(forViewportCameras: viewportCameras)
+        updateUniforms(forViewports: viewports)
+
+        try? buildPipelinesIfNeeded()
+        guard let renderPipelineState, let depthState else { return }
+
+        let renderEncoder = renderEncoder(viewports: viewports,
+                                          colorTexture: colorTexture,
+                                          colorStoreAction: colorStoreAction,
+                                          depthTexture: depthTexture,
+                                          stencilTexture: stencilTexture,
+                                          rasterizationRateMap: rasterizationRateMap,
+                                          renderTargetArrayLength: renderTargetArrayLength,
+                                          for: commandBuffer)
 
         renderEncoder.pushDebugGroup("Draw Splat Model")
 
-        renderEncoder.setRenderPipelineState(pipelineState)
-
+        renderEncoder.setRenderPipelineState(renderPipelineState)
         renderEncoder.setDepthStencilState(depthState)
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
@@ -319,6 +414,7 @@ public class SplatRenderer {
                                      instanceCount: splatBuffer.count)
 
         renderEncoder.popDebugGroup()
+        renderEncoder.endEncoding()
     }
 
     // Set indicesPrime to a depth-sorted version of indices, then swap indices and indicesPrime
@@ -366,7 +462,7 @@ public class SplatRenderer {
                 }
             }
 
-            if Constants.renderFrontToBack {
+            if renderFrontToBack {
                 orderAndDepthTempSort.sort { $0.depth < $1.depth }
             } else {
                 orderAndDepthTempSort.sort { $0.depth > $1.depth }
@@ -563,5 +659,14 @@ private extension SIMD3<Float> {
 private extension SIMD4 where Scalar: BinaryFloatingPoint {
     var xyz: SIMD3<Scalar> {
         .init(x: x, y: y, z: z)
+    }
+}
+
+private extension MTLLibrary {
+    func makeRequiredFunction(name: String) -> MTLFunction {
+        guard let result = makeFunction(name: name) else {
+            fatalError("Unable to load required shader function: \"\(name)\"")
+        }
+        return result
     }
 }
