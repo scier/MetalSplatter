@@ -1,7 +1,7 @@
-import Accelerate
 import Foundation
 import Metal
 import MetalKit
+import os
 import SplatIO
 
 #if arch(x86_64)
@@ -17,8 +17,6 @@ public class SplatRenderer {
         // TODO: compare the behaviour and performance of sortByDistance
         // notes: sortByDistance introduces unstable artifacts when you get close to an object; whereas !sortByDistance introduces artifacts are you turn -- but they're a little subtler maybe?
         static let sortByDistance = true
-        // TODO: compare the performance of useAccelerateForSort, both for small and large scenes
-        static let useAccelerateForSort = false
     }
 
     private static let log =
@@ -156,13 +154,6 @@ public class SplatRenderer {
     // TODO: Replace this with a more robust multiple-buffer scheme to guarantee we're never actively sorting a buffer still in use for rendering
     var orderBufferPrime: MetalBuffer<IndexType>
 
-    // Sorting via Accelerate
-    // While not sorting, we guarantee that orderBufferTempSort remains valid: the count may not match splatCount, but for every i in 0..<orderBufferTempSort.count, orderBufferTempSort should contain exactly one element equal to i
-    var orderBufferTempSort: MetalBuffer<UInt>
-    // depthBufferTempSort is ordered by vertex index; so depthBufferTempSort[0] -> splatBuffer[0], *not* orderBufferTempSort[0]
-    var depthBufferTempSort: MetalBuffer<Float>
-
-    // Sorting on CPU
     // While not sorting, we guarantee that orderAndDepthTempSort remains valid: the count may not match splatCount, but the array should contain all indices.
     // So for every i in 0..<orderAndDepthTempSort.count, orderAndDepthTempSort should contain exactly one element with .index = i
     var orderAndDepthTempSort: [SplatIndexAndDepth] = []
@@ -198,8 +189,6 @@ public class SplatRenderer {
         self.splatBuffer = try MetalBuffer(device: device)
         self.orderBuffer = try MetalBuffer(device: device)
         self.orderBufferPrime = try MetalBuffer(device: device)
-        self.orderBufferTempSort = try MetalBuffer(device: device)
-        self.depthBufferTempSort = try MetalBuffer(device: device)
 
         do {
             library = try device.makeDefaultLibrary(bundle: Bundle.module)
@@ -212,8 +201,6 @@ public class SplatRenderer {
         splatBuffer.count = 0
         orderBuffer.count = 0
         orderBufferPrime.count = 0
-        orderBufferTempSort.count = 0
-        depthBufferTempSort.count = 0
         orderAndDepthTempSort = []
     }
 
@@ -419,14 +406,6 @@ public class SplatRenderer {
 
     // Set indicesPrime to a depth-sorted version of indices, then swap indices and indicesPrime
     public func resortIndices() {
-        if Constants.useAccelerateForSort {
-            resortIndicesViaAccelerate()
-        } else {
-            resortIndicesOnCPU()
-        }
-    }
-
-    public func resortIndicesOnCPU() {
         guard !sorting else { return }
         sorting = true
         onSortStart?()
@@ -481,72 +460,6 @@ public class SplatRenderer {
                 try orderBufferPrime.ensureCapacity(splatCount)
                 for i in 0..<splatCount {
                     orderBufferPrime.append(orderAndDepthTempSort[i].index)
-                }
-
-                swap(&orderBuffer, &orderBufferPrime)
-            } catch {
-                // TODO: report error
-            }
-        }
-    }
-    
-    public func resortIndicesViaAccelerate() {
-        guard !sorting else { return }
-        sorting = true
-        onSortStart?()
-        let sortStartTime = Date()
-
-        let splatCount = splatBuffer.count
-
-        if orderBufferTempSort.count != splatCount {
-            do {
-                try orderBufferTempSort.ensureCapacity(splatCount)
-                orderBufferTempSort.count = splatCount
-                try depthBufferTempSort.ensureCapacity(splatCount)
-                depthBufferTempSort.count = splatCount
-
-                for i in 0..<splatCount {
-                    orderBufferTempSort.values[i] = UInt(i)
-                }
-            } catch {
-                // TODO: report error
-                sorting = false
-                return
-            }
-        }
-
-        let cameraWorldForward = cameraWorldForward
-        let cameraWorldPosition = cameraWorldPosition
-
-        Task(priority: .high) {
-            defer {
-                sorting = false
-                onSortComplete?(-sortStartTime.timeIntervalSinceNow)
-            }
-
-            // TODO: use Accelerate to calculate the depth
-            // We maintain the old order in indicesTempSort in order to provide the opportunity to optimize the sort performance
-            for index in 0..<splatCount {
-                let splatPosition = splatBuffer.values[Int(index)].position
-                let splatPositionUnpacked = SIMD3<Float>(splatPosition.x, splatPosition.y, splatPosition.z)
-                if Constants.sortByDistance {
-                    depthBufferTempSort.values[index] = (splatPositionUnpacked - cameraWorldPosition).lengthSquared
-                } else {
-                    depthBufferTempSort.values[index] = dot(splatPositionUnpacked, cameraWorldForward)
-                }
-            }
-
-            vDSP_vsorti(depthBufferTempSort.values,
-                        orderBufferTempSort.values,
-                        nil,
-                        vDSP_Length(splatCount),
-                        Constants.renderFrontToBack ? 1 : -1)
-
-            do {
-                orderBufferPrime.count = 0
-                try orderBufferPrime.ensureCapacity(splatCount)
-                for i in 0..<splatCount {
-                    orderBufferPrime.append(UInt32(orderBufferTempSort.values[i]))
                 }
 
                 swap(&orderBuffer, &orderBufferPrime)
