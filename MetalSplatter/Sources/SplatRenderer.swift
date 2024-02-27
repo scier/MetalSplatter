@@ -41,7 +41,6 @@ public class SplatRenderer {
     enum BufferIndex: NSInteger {
         case uniforms = 0
         case splat    = 1
-        case order    = 2
     }
 
     // Keep in sync with Shaders.metal : Uniforms
@@ -141,21 +140,16 @@ public class SplatRenderer {
     typealias IndexType = UInt32
     // splatBuffer contains one entry for each gaussian splat
     var splatBuffer: MetalBuffer<Splat>
-    // orderBuffer indexes into splatBuffer, and is sorted by distance
-    var orderBuffer: MetalBuffer<IndexType>
+    // splatBufferPrime is a copy of splatBuffer, which is not currenly in use for rendering.
+    // We use this for sorting, and when we're done, swap it with splatBuffer.
+    // There's a good chance that we'll sometimes end up sorting a splatBuffer still in use for
+    // rendering.
+    // TODO: Replace this with a more robust multiple-buffer scheme to guarantee we're never actively sorting a buffer still in use for rendering
+    var splatBufferPrime: MetalBuffer<Splat>
 
     public var splatCount: Int { splatBuffer.count }
 
     var sorting = false
-    // orderBufferPrime is a copy of orderBuffer, which is not currenly in use for rendering.
-    // We use this for sorting, and when we're done, swap it with orderBuffer.
-    // There's a good chance that we'll sometimes end up sorting an orderBuffer still in use for
-    // rendering;.
-    // TODO: Replace this with a more robust multiple-buffer scheme to guarantee we're never actively sorting a buffer still in use for rendering
-    var orderBufferPrime: MetalBuffer<IndexType>
-
-    // While not sorting, we guarantee that orderAndDepthTempSort remains valid: the count may not match splatCount, but the array should contain all indices.
-    // So for every i in 0..<orderAndDepthTempSort.count, orderAndDepthTempSort should contain exactly one element with .index = i
     var orderAndDepthTempSort: [SplatIndexAndDepth] = []
 
     private var readFailure: Error?
@@ -187,8 +181,7 @@ public class SplatRenderer {
         self.uniforms = UnsafeMutableRawPointer(dynamicUniformBuffers.contents()).bindMemory(to: UniformsArray.self, capacity: 1)
 
         self.splatBuffer = try MetalBuffer(device: device)
-        self.orderBuffer = try MetalBuffer(device: device)
-        self.orderBufferPrime = try MetalBuffer(device: device)
+        self.splatBufferPrime = try MetalBuffer(device: device)
 
         do {
             library = try device.makeDefaultLibrary(bundle: Bundle.module)
@@ -199,9 +192,6 @@ public class SplatRenderer {
 
     public func reset() {
         splatBuffer.count = 0
-        orderBuffer.count = 0
-        orderBufferPrime.count = 0
-        orderAndDepthTempSort = []
     }
 
     public func readPLY(from url: URL) throws {
@@ -302,7 +292,7 @@ public class SplatRenderer {
         cameraWorldForward = viewports.map { Self.cameraWorldForward(forViewMatrix: $0.viewMatrix) }.mean?.normalized ?? .init(x: 0, y: 0, z: -1)
 
         if !sorting {
-            resortIndices()
+            resort()
         }
     }
 
@@ -393,7 +383,6 @@ public class SplatRenderer {
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: BufferIndex.splat.rawValue)
-        renderEncoder.setVertexBuffer(orderBuffer.buffer, offset: 0, index: BufferIndex.order.rawValue)
 
         renderEncoder.drawPrimitives(type: .triangleStrip,
                                      vertexStart: 0,
@@ -404,8 +393,8 @@ public class SplatRenderer {
         renderEncoder.endEncoding()
     }
 
-    // Set indicesPrime to a depth-sorted version of indices, then swap indices and indicesPrime
-    public func resortIndices() {
+    // Sort splatBuffer (read-only), storing the results in splatBuffer (write-only) then swap splatBuffer and splatBufferPrime
+    public func resort() {
         guard !sorting else { return }
         sorting = true
         onSortStart?()
@@ -415,9 +404,9 @@ public class SplatRenderer {
 
         if orderAndDepthTempSort.count != splatCount {
             orderAndDepthTempSort = Array(repeating: SplatIndexAndDepth(index: .max, depth: 0), count: splatCount)
-            for i in 0..<splatCount {
-                orderAndDepthTempSort[i].index = UInt32(i)
-            }
+        }
+        for i in 0..<splatCount {
+            orderAndDepthTempSort[i].index = UInt32(i)
         }
 
         let cameraWorldForward = cameraWorldForward
@@ -456,13 +445,14 @@ public class SplatRenderer {
             }
 
             do {
-                orderBufferPrime.count = 0
-                try orderBufferPrime.ensureCapacity(splatCount)
-                for i in 0..<splatCount {
-                    orderBufferPrime.append(orderAndDepthTempSort[i].index)
+                try splatBufferPrime.setCapacity(splatCount)
+                splatBufferPrime.count = 0
+                for newIndex in 0..<orderAndDepthTempSort.count {
+                    let oldIndex = Int(orderAndDepthTempSort[newIndex].index)
+                    splatBufferPrime.append(splatBuffer, fromIndex: oldIndex)
                 }
 
-                swap(&orderBuffer, &orderBufferPrime)
+                swap(&splatBuffer, &splatBufferPrime)
             } catch {
                 // TODO: report error
             }

@@ -11,7 +11,6 @@ enum BufferIndex: int32_t
 {
     BufferIndexUniforms = 0,
     BufferIndexSplat    = 1,
-    BufferIndexOrder    = 2,
 };
 
 typedef struct
@@ -121,13 +120,12 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
                                     uint instanceID [[instance_id]],
                                     ushort amp_id [[amplification_id]],
                                     constant Splat* splatArray [[ buffer(BufferIndexSplat) ]],
-                                    constant metal::uint32_t* orderArray [[ buffer(BufferIndexOrder) ]],
                                     constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]]) {
     ColorInOut out;
 
     Uniforms uniforms = uniformsArray.uniforms[min(int(amp_id), kMaxViewCount)];
 
-    Splat splat = splatArray[orderArray[instanceID]];
+    Splat splat = splatArray[instanceID];
     float4 viewPosition4 = uniforms.viewMatrix * float4(splat.position, 1);
     float3 viewPosition3 = viewPosition4.xyz;
 
