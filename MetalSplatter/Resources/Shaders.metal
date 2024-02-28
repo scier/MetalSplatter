@@ -144,34 +144,25 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
         projectedCenter.x > bounds ||
         projectedCenter.y < -bounds ||
         projectedCenter.y > bounds) {
-        out.position = float4(1, 1, 1, 0);
+        out.position = float4(1, 1, 0, 1);
         return out;
     }
 
-    half2 vertexRelativePosition;
-    switch (vertexID % 4) {
-        case 0:
-            vertexRelativePosition = half2(-1, -1); break;
-        case 1:
-            vertexRelativePosition = half2(-1,  1); break;
-        case 2:
-            vertexRelativePosition = half2( 1, -1); break;
-        case 3:
-            vertexRelativePosition = half2( 1,  1); break;
-    }
-    half2 screenCenter = half2(projectedCenter.xy / projectedCenter.w);
+    const half2 relativeCoordinatesArray[] = { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } };
+    half2 relativeCoordinates = relativeCoordinatesArray[vertexID];
     half2 screenSizeFloat = half2(uniforms.screenSize.x, uniforms.screenSize.y);
-    half2 screenDelta =
-        (vertexRelativePosition.x * half2(axis1) +
-         vertexRelativePosition.y * half2(axis2))
+    half2 projectedScreenDelta =
+        (relativeCoordinates.x * half2(axis1) + relativeCoordinates.y * half2(axis2))
         * 2
         * kBoundsRadius
         / screenSizeFloat;
-    half2 screenVertex = screenCenter + screenDelta;
 
-    out.position = float4(screenVertex.x, screenVertex.y, 0, 1);
-    out.relativePosition = kBoundsRadius * vertexRelativePosition;
-    out.color = half4(splat.color);
+    out.position = float4(projectedCenter.x + projectedScreenDelta.x * projectedCenter.w,
+                          projectedCenter.y + projectedScreenDelta.y * projectedCenter.w,
+                          projectedCenter.z,
+                          projectedCenter.w);
+    out.relativePosition = kBoundsRadius * relativeCoordinates;
+    out.color = splat.color;
     return out;
 }
 
