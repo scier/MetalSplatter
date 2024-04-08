@@ -47,7 +47,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                           sampleCount: metalKitView.sampleCount,
                                           maxViewCount: 1,
                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            try splat.readPLY(from: url)
+            try splat.read(from: url)
             modelRenderer = splat
         case .sampleBox:
             modelRenderer = try! SampleBoxRenderer(device: device,

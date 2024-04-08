@@ -61,7 +61,7 @@ class VisionSceneRenderer {
                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
             // Store depth on visionOS because it's used for reprojection by the frame interpolator, since we don't hit a solid 90fps
             splat.storeDepth = true
-            try splat.readPLY(from: url)
+            try splat.read(from: url)
             modelRenderer = splat
         case .sampleBox:
             modelRenderer = try! SampleBoxRenderer(device: device,

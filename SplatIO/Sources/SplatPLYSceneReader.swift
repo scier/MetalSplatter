@@ -44,7 +44,12 @@ private class SplatPLYSceneReaderStream {
     private var pointElementMapping: PointElementMapping?
     private var expectedPointCount: UInt32 = 0
     private var pointCount: UInt32 = 0
-    private var reusablePoint = SplatScenePoint(position: .zero, normal: .zero, color: .none, opacity: .zero, scale: .zero, rotation: .init(vector: .zero))
+    private var reusablePoint = SplatScenePoint(position: .zero,
+                                                normal: .zero,
+                                                color: .linearUInt8(0, 0, 0),
+                                                opacity: .linearFloat(.zero),
+                                                scale: .exponent(0, 0, 0),
+                                                rotation: .init(vector: .zero))
 
     func read(_ ply: PLYReader, to delegate: SplatSceneReaderDelegate) {
         self.delegate = delegate
@@ -151,7 +156,7 @@ private struct PointElementMapping {
     public enum Color {
         case sphericalHarmonic(Int, Int, Int, [Int])
         case firstOrderSphericalHarmonic(Int, Int, Int)
-        case linearFloat(Int, Int, Int)
+        case linearFloat256(Int, Int, Int)
         case linearUInt8(Int, Int, Int)
     }
 
@@ -162,9 +167,9 @@ private struct PointElementMapping {
     let positionXPropertyIndex: Int
     let positionYPropertyIndex: Int
     let positionZPropertyIndex: Int
-    let normalXPropertyIndex: Int
-    let normalYPropertyIndex: Int
-    let normalZPropertyIndex: Int
+    let normalXPropertyIndex: Int?
+    let normalYPropertyIndex: Int?
+    let normalZPropertyIndex: Int?
     let colorPropertyIndices: Color
     let scaleXPropertyIndex: Int
     let scaleYPropertyIndex: Int
@@ -184,9 +189,9 @@ private struct PointElementMapping {
         let positionXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionX)
         let positionYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionY)
         let positionZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionZ)
-        let normalXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalX)
-        let normalYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalY)
-        let normalZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalZ)
+        let normalXPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: PropertyName.normalX)
+        let normalYPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: PropertyName.normalY)
+        let normalZPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: PropertyName.normalZ)
 
         let color: Color
         if let sh0_rPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: PropertyName.sh0_r),
@@ -204,10 +209,11 @@ private struct PointElementMapping {
         } else if headerElement.hasProperty(forName: PropertyName.colorR, type: .float32) &&
                     headerElement.hasProperty(forName: PropertyName.colorG, type: .float32) &&
                     headerElement.hasProperty(forName: PropertyName.colorB, type: .float32) {
+            // Special case for NRRFStudio SH=0 files. This may be fixed now?
             let colorRPropertyIndex = try headerElement.index(forPropertyNamed: PropertyName.colorR, type: .float32)
             let colorGPropertyIndex = try headerElement.index(forPropertyNamed: PropertyName.colorG, type: .float32)
             let colorBPropertyIndex = try headerElement.index(forPropertyNamed: PropertyName.colorB, type: .float32)
-            color = .linearFloat(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex)
+            color = .linearFloat256(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex)
         } else if headerElement.hasProperty(forName: PropertyName.colorR, type: .uint8) &&
                     headerElement.hasProperty(forName: PropertyName.colorG, type: .uint8) &&
                     headerElement.hasProperty(forName: PropertyName.colorB, type: .uint8) {
@@ -249,12 +255,16 @@ private struct PointElementMapping {
     }
 
     func apply(from element: PLYElement, to result: inout SplatScenePoint) throws {
-        result.position.x = try element.float32Value(forPropertyIndex: positionXPropertyIndex)
-        result.position.y = try element.float32Value(forPropertyIndex: positionYPropertyIndex)
-        result.position.z = try element.float32Value(forPropertyIndex: positionZPropertyIndex)
-        result.normal.x = try element.float32Value(forPropertyIndex: normalXPropertyIndex)
-        result.normal.y = try element.float32Value(forPropertyIndex: normalYPropertyIndex)
-        result.normal.z = try element.float32Value(forPropertyIndex: normalZPropertyIndex)
+        result.position = SIMD3(x: try element.float32Value(forPropertyIndex: positionXPropertyIndex),
+                                y: try element.float32Value(forPropertyIndex: positionYPropertyIndex),
+                                z: try element.float32Value(forPropertyIndex: positionZPropertyIndex))
+        if let normalXPropertyIndex, let normalYPropertyIndex, let normalZPropertyIndex {
+            result.normal = SIMD3(x: try element.float32Value(forPropertyIndex: normalXPropertyIndex),
+                                  y: try element.float32Value(forPropertyIndex: normalYPropertyIndex),
+                                  z: try element.float32Value(forPropertyIndex: normalZPropertyIndex))
+        } else {
+            result.normal = nil
+        }
 
         switch colorPropertyIndices {
         case .sphericalHarmonic(let r, let g, let b, let sphericalHarmonicsPropertyIndices):
@@ -275,20 +285,21 @@ private struct PointElementMapping {
             result.color = .firstOrderSphericalHarmonic(try element.float32Value(forPropertyIndex: r),
                                                         try element.float32Value(forPropertyIndex: g),
                                                         try element.float32Value(forPropertyIndex: b))
-        case .linearFloat(let r, let g, let b):
-            result.color = .linearFloat(try element.float32Value(forPropertyIndex: r),
-                                        try element.float32Value(forPropertyIndex: g),
-                                        try element.float32Value(forPropertyIndex: b))
+        case .linearFloat256(let r, let g, let b):
+            result.color = .linearFloat256(try element.float32Value(forPropertyIndex: r),
+                                           try element.float32Value(forPropertyIndex: g),
+                                           try element.float32Value(forPropertyIndex: b))
         case .linearUInt8(let r, let g, let b):
             result.color = .linearUInt8(try element.uint8Value(forPropertyIndex: r),
                                         try element.uint8Value(forPropertyIndex: g),
                                         try element.uint8Value(forPropertyIndex: b))
         }
 
-        result.scale.x = try element.float32Value(forPropertyIndex: scaleXPropertyIndex)
-        result.scale.y = try element.float32Value(forPropertyIndex: scaleYPropertyIndex)
-        result.scale.z = try element.float32Value(forPropertyIndex: scaleZPropertyIndex)
-        result.opacity = try element.float32Value(forPropertyIndex: opacityPropertyIndex)
+        result.scale =
+            .exponent(try element.float32Value(forPropertyIndex: scaleXPropertyIndex),
+                      try element.float32Value(forPropertyIndex: scaleYPropertyIndex),
+                      try element.float32Value(forPropertyIndex: scaleZPropertyIndex))
+        result.opacity = .logitFloat(try element.float32Value(forPropertyIndex: opacityPropertyIndex))
         result.rotation.real   = try element.float32Value(forPropertyIndex: rotation0PropertyIndex)
         result.rotation.imag.x = try element.float32Value(forPropertyIndex: rotation1PropertyIndex)
         result.rotation.imag.y = try element.float32Value(forPropertyIndex: rotation2PropertyIndex)

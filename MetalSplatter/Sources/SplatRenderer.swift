@@ -194,9 +194,9 @@ public class SplatRenderer {
         splatBuffer.count = 0
     }
 
-    public func readPLY(from url: URL) throws {
+    public func read(from url: URL) throws {
         readFailure = nil
-        SplatPLYSceneReader(url).read(to: self)
+        try AutodetectSceneReader(url).read(to: self)
         if let readFailure {
             self.readFailure = nil
             throw readFailure
@@ -263,15 +263,19 @@ public class SplatRenderer {
         try splatBuffer.ensureCapacity(splatBuffer.count + pointCount)
     }
 
-    public func add(_ point: SplatScenePoint) throws {
+    public func add(_ points: [SplatScenePoint]) throws {
         do {
-            try ensureAdditionalCapacity(1)
+            try ensureAdditionalCapacity(points.count)
         } catch {
             Self.log.error("Failed to grow buffers: \(error)")
             return
         }
 
-        splatBuffer.append([ Splat(point) ])
+        splatBuffer.append(points.map { Splat($0) })
+    }
+
+    public func add(_ point: SplatScenePoint) throws {
+        try add([ point ])
     }
 
     private func switchToNextDynamicBuffer() {
@@ -461,15 +465,17 @@ public class SplatRenderer {
 }
 
 extension SplatRenderer: SplatSceneReaderDelegate {
-    public func didStartReading(withPointCount pointCount: UInt32) {
-        Self.log.info("Will read \(pointCount) points")
-        try? ensureAdditionalCapacity(Int(pointCount))
+    public func didStartReading(withPointCount pointCount: UInt32?) {
+        if let pointCount {
+            Self.log.info("Will read \(pointCount) points")
+            try? ensureAdditionalCapacity(Int(pointCount))
+        } else {
+            Self.log.info("Will read points")
+        }
     }
 
     public func didRead(points: [SplatIO.SplatScenePoint]) {
-        for point in points {
-            try? add(point)
-        }
+        try? add(points)
     }
 
     public func didFinishReading() {
@@ -484,9 +490,14 @@ extension SplatRenderer: SplatSceneReaderDelegate {
 
 extension SplatRenderer.Splat {
     init(_ splat: SplatScenePoint) {
-        let scale = SIMD3<Float>(exp(splat.scale.x),
-                                 exp(splat.scale.y),
-                                 exp(splat.scale.z))
+        let scale: SIMD3<Float>
+        switch splat.scale {
+        case let .exponent(x, y, z):
+            scale = SIMD3(exp(x), exp(y), exp(z))
+        case let .linearFloat(x, y, z):
+            scale = SIMD3(x, y, z)
+        }
+
         let rotation = splat.rotation.normalized
 
         var color: SIMD3<Float>
@@ -496,15 +507,21 @@ extension SplatRenderer.Splat {
             color = SIMD3(x: max(0, min(1, 0.5 + SH_C0 * r)),
                           y: max(0, min(1, 0.5 + SH_C0 * g)),
                           z: max(0, min(1, 0.5 + SH_C0 * b)))
-        case .linearFloat(let r, let g, let b):
+        case let .linearFloat256(r, g, b):
             color = SIMD3(x: r / 255.0, y: g / 255.0, z: b / 255.0)
-        case .linearUInt8(let r, let g, let b):
+        case let .linearUInt8(r, g, b):
             color = SIMD3(x: Float(r) / 255.0, y: Float(g) / 255.0, z: Float(b) / 255.0)
-        case .none:
-            color = .zero
         }
 
-        let opacity = 1 / (1 + exp(-splat.opacity))
+        let opacity: Float
+        switch splat.opacity {
+        case let .logitFloat(value):
+            opacity = 1 / (1 + exp(-value))
+        case let .linearFloat(value):
+            opacity = value
+        case let .linearUInt8(value):
+            opacity = Float(value) / 255.0
+        }
 
         self.init(position: splat.position,
                   color: .init(color.sRGBToLinear, opacity),

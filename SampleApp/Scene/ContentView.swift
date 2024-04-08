@@ -56,7 +56,7 @@ struct ContentView: View {
 
             Spacer()
 
-            Button("Read PLY") {
+            Button("Read Scene File") {
                 isPickingFile = true
             }
             .padding()

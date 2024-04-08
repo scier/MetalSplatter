@@ -16,7 +16,7 @@ final class SplatIOTests: XCTestCase {
             didFail = false
         }
 
-        func didStartReading(withPointCount pointCount: UInt32) {
+        func didStartReading(withPointCount pointCount: UInt32?) {
             XCTAssertNil(expectedPointCount)
             XCTAssertFalse(didFinish)
             XCTAssertFalse(didFail)
@@ -28,7 +28,6 @@ final class SplatIOTests: XCTestCase {
         }
 
         func didFinishReading() {
-            XCTAssertNotNil(expectedPointCount)
             XCTAssertFalse(didFinish)
             XCTAssertFalse(didFail)
             didFinish = true
@@ -52,7 +51,6 @@ final class SplatIOTests: XCTestCase {
 
         let content = ContentCounter()
         reader.read(to: content)
-        XCTAssertNotNil(content.expectedPointCount)
         XCTAssertTrue(content.didFinish)
         XCTAssertFalse(content.didFail)
         if let expectedPointCount = content.expectedPointCount {

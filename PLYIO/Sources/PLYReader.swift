@@ -76,7 +76,6 @@ public class PLYReader {
         static let cr = UInt8(ascii: "\r")
         static let lf = UInt8(ascii: "\n")
         static let space = UInt8(ascii: " ")
-        static let isLittleEndian = 14 == 14.littleEndian
     }
 
     fileprivate enum HeaderKeyword: String {
