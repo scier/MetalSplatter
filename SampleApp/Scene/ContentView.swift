@@ -66,7 +66,10 @@ struct ContentView: View {
             .disabled(immersiveSpaceIsShown)
 #endif
             .fileImporter(isPresented: $isPickingFile,
-                          allowedContentTypes: [ UTType(filenameExtension: "ply")! ]) {
+                          allowedContentTypes: [
+                            UTType(filenameExtension: "ply")!,
+                            UTType(filenameExtension: "splat")!,
+                          ]) {
                 isPickingFile = false
                 switch $0 {
                 case .success(let url):
