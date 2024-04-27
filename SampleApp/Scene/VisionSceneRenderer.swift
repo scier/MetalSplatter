@@ -45,7 +45,7 @@ class VisionSceneRenderer {
         arSession = ARKitSession()
     }
 
-    func load(_ model: ModelIdentifier?) throws {
+    func load(_ model: ModelIdentifier?) async throws {
         guard model != self.model else { return }
         self.model = model
 
@@ -61,7 +61,7 @@ class VisionSceneRenderer {
                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
             // Store depth on visionOS because it's used for reprojection by the frame interpolator, since we don't hit a solid 90fps
             splat.storeDepth = true
-            try splat.read(from: url)
+            try await splat.read(from: url)
             modelRenderer = splat
         case .sampleBox:
             modelRenderer = try! SampleBoxRenderer(device: device,

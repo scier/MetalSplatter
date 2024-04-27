@@ -33,30 +33,30 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         metalKitView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
     }
 
-    func load(_ model: ModelIdentifier?) throws {
+    func load(_ model: ModelIdentifier?) async throws {
         guard model != self.model else { return }
         self.model = model
 
         modelRenderer = nil
         switch model {
         case .gaussianSplat(let url):
-            let splat = try SplatRenderer(device: device,
-                                          colorFormat: metalKitView.colorPixelFormat,
-                                          depthFormat: metalKitView.depthStencilPixelFormat,
-                                          stencilFormat: metalKitView.depthStencilPixelFormat,
-                                          sampleCount: metalKitView.sampleCount,
-                                          maxViewCount: 1,
-                                          maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            try splat.read(from: url)
+            let splat = try await SplatRenderer(device: device,
+                                                colorFormat: metalKitView.colorPixelFormat,
+                                                depthFormat: metalKitView.depthStencilPixelFormat,
+                                                stencilFormat: metalKitView.depthStencilPixelFormat,
+                                                sampleCount: metalKitView.sampleCount,
+                                                maxViewCount: 1,
+                                                maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            try await splat.read(from: url)
             modelRenderer = splat
         case .sampleBox:
-            modelRenderer = try! SampleBoxRenderer(device: device,
-                                                   colorFormat: metalKitView.colorPixelFormat,
-                                                   depthFormat: metalKitView.depthStencilPixelFormat,
-                                                   stencilFormat: metalKitView.depthStencilPixelFormat,
-                                                   sampleCount: metalKitView.sampleCount,
-                                                   maxViewCount: 1,
-                                                   maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            modelRenderer = try! await SampleBoxRenderer(device: device,
+                                                         colorFormat: metalKitView.colorPixelFormat,
+                                                         depthFormat: metalKitView.depthStencilPixelFormat,
+                                                         stencilFormat: metalKitView.depthStencilPixelFormat,
+                                                         sampleCount: metalKitView.sampleCount,
+                                                         maxViewCount: 1,
+                                                         maxSimultaneousRenders: Constants.maxSimultaneousRenders)
         case .none:
             break
         }

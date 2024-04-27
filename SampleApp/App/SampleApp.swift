@@ -21,12 +21,14 @@ struct SampleApp: App {
         ImmersiveSpace(for: ModelIdentifier.self) { modelIdentifier in
             CompositorLayer(configuration: ContentStageConfiguration()) { layerRenderer in
                 let renderer = VisionSceneRenderer(layerRenderer)
-                do {
-                    try renderer.load(modelIdentifier.wrappedValue)
-                } catch {
-                    print("Error loading model: \(error.localizedDescription)")
+                Task {
+                    do {
+                        try await renderer.load(modelIdentifier.wrappedValue)
+                    } catch {
+                        print("Error loading model: \(error.localizedDescription)")
+                    }
+                    renderer.startRenderLoop()
                 }
-                renderer.startRenderLoop()
             }
         }
         .immersionStyle(selection: .constant(.full), in: .full)

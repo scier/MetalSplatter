@@ -152,8 +152,6 @@ public class SplatRenderer {
     var sorting = false
     var orderAndDepthTempSort: [SplatIndexAndDepth] = []
 
-    private var readFailure: Error?
-
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
                 depthFormat: MTLPixelFormat,
@@ -192,15 +190,13 @@ public class SplatRenderer {
 
     public func reset() {
         splatBuffer.count = 0
+        try? splatBuffer.setCapacity(0)
     }
 
-    public func read(from url: URL) throws {
-        readFailure = nil
-        try AutodetectSceneReader(url).read(to: self)
-        if let readFailure {
-            self.readFailure = nil
-            throw readFailure
-        }
+    public func read(from url: URL) async throws {
+        var newPoints = SplatMemoryBuffer()
+        try await newPoints.read(from: try AutodetectSceneReader(url))
+        try add(newPoints.points)
     }
 
     private func resetPipelines() {
@@ -461,30 +457,6 @@ public class SplatRenderer {
                 // TODO: report error
             }
         }
-    }
-}
-
-extension SplatRenderer: SplatSceneReaderDelegate {
-    public func didStartReading(withPointCount pointCount: UInt32?) {
-        if let pointCount {
-            Self.log.info("Will read \(pointCount) points")
-            try? ensureAdditionalCapacity(Int(pointCount))
-        } else {
-            Self.log.info("Will read points")
-        }
-    }
-
-    public func didRead(points: [SplatIO.SplatScenePoint]) {
-        try? add(points)
-    }
-
-    public func didFinishReading() {
-        Self.log.info("Finished reading points")
-    }
-
-    public func didFailReading(withError error: Error?) {
-        readFailure = error
-        Self.log.error("Failed to read points: \(error)")
     }
 }
 
