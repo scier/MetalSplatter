@@ -117,7 +117,7 @@ public class SampleBoxRenderer {
         }
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
-        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
+        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.greater
         depthStateDescriptor.isDepthWriteEnabled = true
         guard let state = device.makeDepthStencilState(descriptor: depthStateDescriptor) else {
             throw Error.depthStencilStateCreationFailed
@@ -169,7 +169,7 @@ public class SampleBoxRenderer {
             renderPassDescriptor.depthAttachment.texture = depthTexture
             renderPassDescriptor.depthAttachment.loadAction = .clear
             renderPassDescriptor.depthAttachment.storeAction = .store
-            renderPassDescriptor.depthAttachment.clearDepth = 1.0
+            renderPassDescriptor.depthAttachment.clearDepth = 0.0
         }
         if let stencilTexture {
             renderPassDescriptor.stencilAttachment.texture = stencilTexture

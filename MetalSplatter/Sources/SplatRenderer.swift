@@ -323,7 +323,7 @@ public class SplatRenderer {
             renderPassDescriptor.depthAttachment.texture = depthTexture
             renderPassDescriptor.depthAttachment.loadAction = .clear
             renderPassDescriptor.depthAttachment.storeAction = storeDepth ? .store : .dontCare
-            renderPassDescriptor.depthAttachment.clearDepth = 1.0
+            renderPassDescriptor.depthAttachment.clearDepth = 0.0
         }
         if let stencilTexture {
             renderPassDescriptor.stencilAttachment.texture = stencilTexture

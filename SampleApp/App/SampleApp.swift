@@ -31,8 +31,16 @@ struct SampleApp: App {
                 }
             }
         }
-        .immersionStyle(selection: .constant(.full), in: .full)
+        .immersionStyle(selection: .constant(immersionStyle), in: immersionStyle)
 #endif // os(visionOS)
+    }
+
+    var immersionStyle: ImmersionStyle {
+        if #available(visionOS 2, *) {
+            .mixed
+        } else {
+            .full
+        }
     }
 }
 
