@@ -12,10 +12,6 @@ public protocol DataConvertible {
     static func array<D: DataProtocol>(_ data: D, count: Int, bigEndian: Bool) -> [Self]
 }
 
-public protocol ZeroProviding {
-    static var zero: Self { get }
-}
-
 fileprivate enum DataConvertibleConstants {
     fileprivate static let isBigEndian = 42 == 42.bigEndian
 }
@@ -70,7 +66,7 @@ where Self: DataConvertible, Self: EndianConvertible {
 }
 
 public extension BinaryFloatingPoint
-where Self: DataConvertible, Self: BitPatternRepresentible, Self.BitPattern: ZeroProviding, Self.BitPattern: EndianConvertible {
+where Self: DataConvertible, Self: BitPatternConvertible, Self.BitPattern: ZeroProviding, Self.BitPattern: EndianConvertible {
     init<D: DataProtocol>(_ data: D, from offset: D.Index, bigEndian: Bool) {
         if bigEndian == DataConvertibleConstants.isBigEndian {
             self = .zero

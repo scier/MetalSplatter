@@ -47,7 +47,7 @@ public extension BinaryInteger where Self: UnsafeRawPointerConvertible, Self: En
     }
 }
 
-public extension BinaryFloatingPoint where Self: UnsafeRawPointerConvertible, Self: BitPatternRepresentible, Self.BitPattern: EndianConvertible {
+public extension BinaryFloatingPoint where Self: UnsafeRawPointerConvertible, Self: BitPatternConvertible, Self.BitPattern: EndianConvertible {
     init(_ data: UnsafeRawPointer, from offset: Int, bigEndian: Bool) {
         self = if bigEndian == UnsafeRawPointerConvertibleConstants.isBigEndian {
             (data + offset).loadUnaligned(as: Self.self)
