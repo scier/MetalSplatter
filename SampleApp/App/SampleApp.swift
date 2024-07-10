@@ -35,6 +35,7 @@ struct SampleApp: App {
 #endif // os(visionOS)
     }
 
+#if os(visionOS)
     var immersionStyle: ImmersionStyle {
         if #available(visionOS 2, *) {
             .mixed
@@ -42,5 +43,6 @@ struct SampleApp: App {
             .full
         }
     }
+#endif // os(visionOS)
 }
 
