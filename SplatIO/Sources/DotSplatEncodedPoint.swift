@@ -45,7 +45,6 @@ extension DotSplatEncodedPoint {
 extension DotSplatEncodedPoint {
     var splatScenePoint: SplatScenePoint {
         SplatScenePoint(position: position,
-                        normal: nil,
                         color: .linearUInt8(color.x, color.y, color.z),
                         opacity: .linearUInt8(color.w),
                         scale: .linearFloat(scales.x, scales.y, scales.z),
