@@ -5,7 +5,7 @@ Render 3D Gaussian Splats using Metal on Apple platforms (iOS/iPhone/iPad, macOS
 
 This is a Swift/Metal library for rendering scenes captured via the techniques described in [3D Gaussian Splatting for Real-Time Radiance Field Rendering](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/). It will let you load up a PLY and visualize it on iOS, macOS, and visionOS (using amplification for rendering in stereo on Vision Pro). Modules include
 * MetalSplatter, the core library to render a frame
-* PLYIO, for reading binary or ASCII PLY files (not writing yet, despite the name); this is standalone, feel free to use it if you just have a hankering to load up some PLY files for some reason.
+* PLYIO, for reading and writing binary or ASCII PLY files; this is standalone, feel free to use it if you just have a hankering to load up some PLY files for some reason.
 * SplatIO, a thin layer on top of PLYIO to interpret these PLY files (as well as .splat files) as sets of splats
 * SampleApp, a mini app to demonstrate how to use the above (based on Apple template code) -- don't expect much, it's intentionally minimal, just an illustration
 * SampleBoxRenderer, a drop-in replacement for MetalSplatter for debugging integration, which just renders the cube from Apple Metal template
@@ -14,7 +14,6 @@ This is a Swift/Metal library for rendering scenes captured via the techniques d
 
 * Support spherical harmonics
 * API documentation
-* Export in SplatIO/PLYIO, to help support editors
 * Explore possibilities for further performance optimizations. Mesh shaders? OIT? Who knows?
 
 ## Documentation

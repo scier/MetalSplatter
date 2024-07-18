@@ -464,43 +464,10 @@ public class SplatRenderer {
 
 extension SplatRenderer.Splat {
     init(_ splat: SplatScenePoint) {
-        let scale: SIMD3<Float>
-        switch splat.scale {
-        case let .exponent(x, y, z):
-            scale = SIMD3(exp(x), exp(y), exp(z))
-        case let .linearFloat(x, y, z):
-            scale = SIMD3(x, y, z)
-        }
-
-        let rotation = splat.rotation.normalized
-
-        var color: SIMD3<Float>
-        switch splat.color {
-        case let .sphericalHarmonic(r, g, b, _), let .firstOrderSphericalHarmonic(r, g, b):
-            let SH_C0: Float = 0.28209479177387814
-            color = SIMD3(x: max(0, min(1, 0.5 + SH_C0 * r)),
-                          y: max(0, min(1, 0.5 + SH_C0 * g)),
-                          z: max(0, min(1, 0.5 + SH_C0 * b)))
-        case let .linearFloat256(r, g, b):
-            color = SIMD3(x: r / 255.0, y: g / 255.0, z: b / 255.0)
-        case let .linearUInt8(r, g, b):
-            color = SIMD3(x: Float(r) / 255.0, y: Float(g) / 255.0, z: Float(b) / 255.0)
-        }
-
-        let opacity: Float
-        switch splat.opacity {
-        case let .logitFloat(value):
-            opacity = 1 / (1 + exp(-value))
-        case let .linearFloat(value):
-            opacity = value
-        case let .linearUInt8(value):
-            opacity = Float(value) / 255.0
-        }
-
         self.init(position: splat.position,
-                  color: .init(color.sRGBToLinear, opacity),
-                  scale: scale,
-                  rotation: rotation)
+                  color: .init(splat.color.asLinearFloat.sRGBToLinear, splat.opacity.asLinearFloat),
+                  scale: splat.scale.asLinearFloat,
+                  rotation: splat.rotation.normalized)
     }
 
     init(position: SIMD3<Float>,

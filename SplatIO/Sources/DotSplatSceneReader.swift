@@ -2,26 +2,28 @@ import Foundation
 import PLYIO
 import simd
 
-/// A reader for Gaussian Splat files in the ".splat" format, possibly created by https://github.com/antimatter15/splat/
+/// A reader for Gaussian Splat files in the ".splat" format, created by https://github.com/antimatter15/splat/
 public class DotSplatSceneReader: SplatSceneReader {
     enum Error: Swift.Error {
         case cannotOpenSource(URL)
-        case readError(URL)
+        case readError
         case unexpectedEndOfFile
     }
 
-    let url: URL
+    let inputStream: InputStream
 
-    public init(_ url: URL) {
-        self.url = url
+    public init(_ inputStream: InputStream) {
+        self.inputStream = inputStream
+    }
+
+    public convenience init(_ url: URL) throws {
+        guard let inputStream = InputStream(url: url) else {
+            throw Error.cannotOpenSource(url)
+        }
+        self.init(inputStream)
     }
 
     public func read(to delegate: any SplatSceneReaderDelegate) {
-        guard let inputStream = InputStream(url: url) else {
-            delegate.didFailReading(withError: Error.cannotOpenSource(url))
-            return
-        }
-
         let bufferSize = 64*1024
         let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
         defer { buffer.deallocate() }
@@ -34,7 +36,7 @@ public class DotSplatSceneReader: SplatSceneReader {
             let readResult = inputStream.read(buffer + bytesInBuffer, maxLength: bufferSize - bytesInBuffer)
             switch readResult {
             case -1:
-                delegate.didFailReading(withError: Error.readError(url))
+                delegate.didFailReading(withError: Error.readError)
                 return
             case 0:
                 guard bytesInBuffer == 0 else {

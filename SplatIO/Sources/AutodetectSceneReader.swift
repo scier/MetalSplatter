@@ -2,16 +2,16 @@ import Foundation
 
 public class AutodetectSceneReader: SplatSceneReader {
     public enum Error: Swift.Error {
-        case unknownPathExtension
+        case cannotDetermineFormat
     }
 
     private let reader: SplatSceneReader
 
     public init(_ url: URL) throws {
-        switch url.pathExtension.lowercased() {
-        case "ply": reader = SplatPLYSceneReader(url)
-        case "splat": reader = DotSplatSceneReader(url)
-        default: throw Error.unknownPathExtension
+        switch SplatFileFormat(for: url) {
+        case .ply: reader = try SplatPLYSceneReader(url)
+        case .dotSplat: reader = try DotSplatSceneReader(url)
+        case .none: throw Error.cannotDetermineFormat
         }
     }
 

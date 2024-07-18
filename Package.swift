@@ -26,6 +26,13 @@ let package = Package(
             name: "SampleBoxRenderer",
             targets: [ "SampleBoxRenderer" ]
         ),
+        .executable(
+            name: "SplatConverter",
+            targets: [ "SplatConverter" ]
+        ),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.0.0")
     ],
     targets: [
         .target(
@@ -65,6 +72,15 @@ let package = Package(
             path: "SampleBoxRenderer",
             sources: [ "Sources" ],
             resources: [ .process("Resources") ]
+        ),
+        .executableTarget(
+            name: "SplatConverter",
+            dependencies: [
+                "SplatIO",
+                .product(name: "ArgumentParser", package: "swift-argument-parser")
+            ],
+            path: "SplatConverter",
+            sources: [ "Sources" ]
         ),
     ]
 )

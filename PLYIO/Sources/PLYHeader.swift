@@ -1,6 +1,15 @@
 import Foundation
 
 public struct PLYHeader: Equatable {
+    enum Keyword: String {
+        case ply = "ply"
+        case format = "format"
+        case comment = "comment"
+        case element = "element"
+        case property = "property"
+        case endHeader = "end_header"
+    }
+
     public enum Format: String, Equatable {
         case ascii
         case binaryLittleEndian = "binary_little_endian"
@@ -11,6 +20,12 @@ public struct PLYHeader: Equatable {
         public var name: String
         public var count: UInt32
         public var properties: [Property]
+
+        public init(name: String, count: UInt32, properties: [Property]) {
+            self.name = name
+            self.count = count
+            self.properties = properties
+        }
 
         public func index(forPropertyNamed name: String) -> Int? {
             properties.firstIndex { $0.name == name }
@@ -32,20 +47,6 @@ public struct PLYHeader: Equatable {
         case float32 // aka float
         case float64 // aka double
 
-        static func fromString(_ string: String) -> PrimitivePropertyType? {
-            switch string {
-            case "int8",    "char"  : .int8
-            case "uint8",   "uchar" : .uint8
-            case "int16",   "short" : .int16
-            case "uint16",  "ushort": .uint16
-            case "int32",   "int"   : .int32
-            case "uint32",  "uint"  : .uint32
-            case "float32", "float" : .float32
-            case "float64", "double": .float64
-            default: nil
-            }
-        }
-
         var isInteger: Bool {
             switch self {
             case .int8, .uint8, .int16, .uint16, .int32, .uint32: true
@@ -66,29 +67,16 @@ public struct PLYHeader: Equatable {
             }
         }
 
-        func decodePrimitive(_ body: UnsafeRawPointer, offset: Int, bigEndian: Bool) -> PLYElement.Property {
+        var maxIntValue: UInt32 {
             switch self {
-            case .int8   : .int8   (Int8  (body, from: offset, bigEndian: bigEndian))
-            case .uint8  : .uint8  (UInt8 (body, from: offset, bigEndian: bigEndian))
-            case .int16  : .int16  (Int16 (body, from: offset, bigEndian: bigEndian))
-            case .uint16 : .uint16 (UInt16(body, from: offset, bigEndian: bigEndian))
-            case .int32  : .int32  (Int32 (body, from: offset, bigEndian: bigEndian))
-            case .uint32 : .uint32 (UInt32(body, from: offset, bigEndian: bigEndian))
-            case .float32: .float32(Float (body, from: offset, bigEndian: bigEndian))
-            case .float64: .float64(Double(body, from: offset, bigEndian: bigEndian))
-            }
-        }
-
-        func decodeList(_ body: UnsafeRawPointer, offset: Int, count: Int, bigEndian: Bool) -> PLYElement.Property {
-            switch self {
-            case .int8   : .listInt8   (Int8.array  (body, from: offset, count: count, bigEndian: bigEndian))
-            case .uint8  : .listUInt8  (UInt8.array (body, from: offset, count: count, bigEndian: bigEndian))
-            case .int16  : .listInt16  (Int16.array (body, from: offset, count: count, bigEndian: bigEndian))
-            case .uint16 : .listUInt16 (UInt16.array(body, from: offset, count: count, bigEndian: bigEndian))
-            case .int32  : .listInt32  (Int32.array (body, from: offset, count: count, bigEndian: bigEndian))
-            case .uint32 : .listUInt32 (UInt32.array(body, from: offset, count: count, bigEndian: bigEndian))
-            case .float32: .listFloat32(Float.array (body, from: offset, count: count, bigEndian: bigEndian))
-            case .float64: .listFloat64(Double.array(body, from: offset, count: count, bigEndian: bigEndian))
+            case .int8   : UInt32(Int8.max  )
+            case .uint8  : UInt32(UInt8.max )
+            case .int16  : UInt32(Int16.max )
+            case .uint16 : UInt32(UInt16.max)
+            case .int32  : UInt32(Int32.max )
+            case .uint32 : UInt32(UInt32.max)
+            case .float32: 0
+            case .float64: 0
             }
         }
     }
@@ -96,58 +84,24 @@ public struct PLYHeader: Equatable {
     public struct Property: Equatable {
         public var name: String
         public var type: PropertyType
+
+        public init(name: String, type: PropertyType) {
+            self.name = name
+            self.type = type
+        }
     }
 
     public var format: Format
     public var version: String
     public var elements: [Element]
 
+    public init(format: Format, version: String, elements: [Element]) {
+        self.format = format
+        self.version = version
+        self.elements = elements
+    }
+
     public func index(forElementNamed name: String) -> Int? {
         elements.firstIndex { $0.name == name }
-    }
-}
-
-extension PLYHeader: CustomStringConvertible {
-    public var description: String {
-        "ply\n" +
-        "format \(format.rawValue) \(version)\n" +
-        elements.map(\.description).reduce("", +)
-    }
-}
-
-extension PLYHeader.Element: CustomStringConvertible {
-    public var description: String {
-        "element \(name) \(count)\n" +
-        properties.map(\.description).reduce("", +)
-    }
-}
-
-extension PLYHeader.Property: CustomStringConvertible {
-    public var description: String {
-        "property \(type) \(name)\n"
-    }
-}
-
-extension PLYHeader.PropertyType: CustomStringConvertible {
-    public var description: String {
-        switch self {
-        case .primitive(let primitiveType): primitiveType.description
-        case .list(let countType, let valueType): "\(countType) \(valueType)"
-        }
-    }
-}
-
-extension PLYHeader.PrimitivePropertyType: CustomStringConvertible {
-    public var description: String {
-        switch self {
-        case .int8: "char"
-        case .uint8: "uchar"
-        case .int16: "short"
-        case .uint16: "ushort"
-        case .int32: "int"
-        case .uint32: "uint"
-        case .float32: "float"
-        case .float64: "double"
-        }
     }
 }
