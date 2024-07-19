@@ -3,6 +3,8 @@ import Metal
 import MetalKit
 import os
 import SplatIO
+import Accelerate
+import simd
 
 #if arch(x86_64)
 typealias Float16 = Float
@@ -398,7 +400,75 @@ public class SplatRenderer {
     }
 
     // Sort splatBuffer (read-only), storing the results in splatBuffer (write-only) then swap splatBuffer and splatBufferPrime
-    public func resort() {
+    public func resort()
+    {
+        self.resortNew()
+//        self.resortOriginal()
+    }
+    
+    public func resortNew() {
+        guard !sorting else { return }
+        sorting = true
+        onSortStart?()
+        let sortStartTime = Date()
+
+        let splatCount = splatBuffer.count
+
+        let cameraWorldForward = cameraWorldForward
+        let cameraWorldPosition = cameraWorldPosition
+
+        self.sortQueue.async { [weak self] in
+            
+            guard let self = self else { return }
+            
+            var orderAndDepthTempSort = Array(repeating: SplatIndexAndDepth(index: .max, depth: 0), count: splatCount)
+            
+            for i in 0..<splatCount {
+                orderAndDepthTempSort[i].index = UInt32(i)
+            }
+            
+            defer {
+                sorting = false
+                onSortComplete?(-sortStartTime.timeIntervalSinceNow)
+            }
+
+            DispatchQueue.concurrentPerform(iterations: splatCount) { [weak self] i in
+
+                guard let self = self else { return }
+
+                let index = orderAndDepthTempSort[i].index
+                let splatPosition = self.splatBuffer.values[Int(index)].position
+                let splatPositionSimd = simd_float3(x: splatPosition.x, y: splatPosition.y, z: splatPosition.z)
+                if Constants.sortByDistance {
+                    orderAndDepthTempSort[i].depth = simd_length_squared(  splatPositionSimd - cameraWorldPosition)
+                } else {
+                    orderAndDepthTempSort[i].depth = simd_dot(splatPositionSimd, cameraWorldForward)
+                }
+            }
+
+            if renderFrontToBack {
+                orderAndDepthTempSort.sort { $0.depth < $1.depth }
+            } else {
+                orderAndDepthTempSort.sort { $0.depth > $1.depth }
+            }
+
+            do {
+                try splatBufferPrime.setCapacity(splatCount)
+                splatBufferPrime.count = 0
+                for newIndex in 0..<orderAndDepthTempSort.count {
+                    let oldIndex = Int(orderAndDepthTempSort[newIndex].index)
+                    splatBufferPrime.append(splatBuffer, fromIndex: oldIndex)
+                }
+
+                swap(&splatBuffer, &splatBufferPrime)
+            } catch {
+                // TODO: report error
+            }
+        }
+    }
+
+    
+    private func resortOriginal() {
         guard !sorting else { return }
         sorting = true
         onSortStart?()
@@ -416,10 +486,8 @@ public class SplatRenderer {
         let cameraWorldForward = cameraWorldForward
         let cameraWorldPosition = cameraWorldPosition
 
-        self.sortQueue.async { [weak self] in
-            
-            guard let self = self else { return }
-            
+        Task(priority: .high) {
+                        
             defer {
                 sorting = false
                 onSortComplete?(-sortStartTime.timeIntervalSinceNow)
