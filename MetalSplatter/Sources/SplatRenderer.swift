@@ -19,6 +19,8 @@ public class SplatRenderer {
         static let sortByDistance = true
     }
 
+    private var sortQueue = DispatchQueue(label: "splatrenderer.sort-queue", qos: .userInteractive)
+    
     private static let log =
         Logger(subsystem: Bundle.module.bundleIdentifier!,
                category: "SplatRenderer")
@@ -414,7 +416,10 @@ public class SplatRenderer {
         let cameraWorldForward = cameraWorldForward
         let cameraWorldPosition = cameraWorldPosition
 
-        Task(priority: .high) {
+        self.sortQueue.async { [weak self] in
+            
+            guard let self = self else { return }
+            
             defer {
                 sorting = false
                 onSortComplete?(-sortStartTime.timeIntervalSinceNow)
