@@ -18,10 +18,10 @@ public class SplatRenderer {
         // Sort by euclidian distance squared from camera position (true), or along the "forward" vector (false)
         // TODO: compare the behaviour and performance of sortByDistance
         // notes: sortByDistance introduces unstable artifacts when you get close to an object; whereas !sortByDistance introduces artifacts are you turn -- but they're a little subtler maybe?
-        static let sortByDistance = true
+        static let sortByDistance = false
     }
 
-    private var sortQueue = DispatchQueue(label: "splatrenderer.sort-queue", qos: .userInteractive)
+    private var sortQueue = DispatchQueue(label: "splatrenderer.sort-queue", qos: .default)
     
     private static let log =
         Logger(subsystem: Bundle.module.bundleIdentifier!,
@@ -156,7 +156,6 @@ public class SplatRenderer {
     public var splatCount: Int { splatBuffer.count }
 
     var sorting = false
-    var orderAndDepthTempSort: [SplatIndexAndDepth] = []
 
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
@@ -468,71 +467,71 @@ public class SplatRenderer {
     }
 
     
-    private func resortOriginal() {
-        guard !sorting else { return }
-        sorting = true
-        onSortStart?()
-        let sortStartTime = Date()
-
-        let splatCount = splatBuffer.count
-
-        if orderAndDepthTempSort.count != splatCount {
-            orderAndDepthTempSort = Array(repeating: SplatIndexAndDepth(index: .max, depth: 0), count: splatCount)
-        }
-        for i in 0..<splatCount {
-            orderAndDepthTempSort[i].index = UInt32(i)
-        }
-
-        let cameraWorldForward = cameraWorldForward
-        let cameraWorldPosition = cameraWorldPosition
-
-        Task(priority: .high) {
-                        
-            defer {
-                sorting = false
-                onSortComplete?(-sortStartTime.timeIntervalSinceNow)
-            }
-
-            if Constants.sortByDistance {
-                for i in 0..<splatCount {
-                    let index = orderAndDepthTempSort[i].index
-                    let splatPosition = splatBuffer.values[Int(index)].position
-                    let dx = splatPosition.x - cameraWorldPosition.x
-                    let dy = splatPosition.y - cameraWorldPosition.y
-                    let dz = splatPosition.z - cameraWorldPosition.z
-                    orderAndDepthTempSort[i].depth = dx*dx + dy*dy + dz*dz // (splatPosition - cameraWorldPosition).lengthSquared
-                }
-            } else {
-                for i in 0..<splatCount {
-                    let index = orderAndDepthTempSort[i].index
-                    let splatPosition = splatBuffer.values[Int(index)].position
-                    let xx = splatPosition.x * cameraWorldForward.x
-                    let yy = splatPosition.y * cameraWorldForward.y
-                    let zz = splatPosition.z * cameraWorldForward.z
-                    orderAndDepthTempSort[i].depth = xx + yy + zz // splatPosition dot cameraWorldForward
-                }
-            }
-
-            if renderFrontToBack {
-                orderAndDepthTempSort.sort { $0.depth < $1.depth }
-            } else {
-                orderAndDepthTempSort.sort { $0.depth > $1.depth }
-            }
-
-            do {
-                try splatBufferPrime.setCapacity(splatCount)
-                splatBufferPrime.count = 0
-                for newIndex in 0..<orderAndDepthTempSort.count {
-                    let oldIndex = Int(orderAndDepthTempSort[newIndex].index)
-                    splatBufferPrime.append(splatBuffer, fromIndex: oldIndex)
-                }
-
-                swap(&splatBuffer, &splatBufferPrime)
-            } catch {
-                // TODO: report error
-            }
-        }
-    }
+//    private func resortOriginal() {
+//        guard !sorting else { return }
+//        sorting = true
+//        onSortStart?()
+//        let sortStartTime = Date()
+//
+//        let splatCount = splatBuffer.count
+//
+//        if orderAndDepthTempSort.count != splatCount {
+//            orderAndDepthTempSort = Array(repeating: SplatIndexAndDepth(index: .max, depth: 0), count: splatCount)
+//        }
+//        for i in 0..<splatCount {
+//            orderAndDepthTempSort[i].index = UInt32(i)
+//        }
+//
+//        let cameraWorldForward = cameraWorldForward
+//        let cameraWorldPosition = cameraWorldPosition
+//
+//        Task(priority: .high) {
+//                        
+//            defer {
+//                sorting = false
+//                onSortComplete?(-sortStartTime.timeIntervalSinceNow)
+//            }
+//
+//            if Constants.sortByDistance {
+//                for i in 0..<splatCount {
+//                    let index = orderAndDepthTempSort[i].index
+//                    let splatPosition = splatBuffer.values[Int(index)].position
+//                    let dx = splatPosition.x - cameraWorldPosition.x
+//                    let dy = splatPosition.y - cameraWorldPosition.y
+//                    let dz = splatPosition.z - cameraWorldPosition.z
+//                    orderAndDepthTempSort[i].depth = dx*dx + dy*dy + dz*dz // (splatPosition - cameraWorldPosition).lengthSquared
+//                }
+//            } else {
+//                for i in 0..<splatCount {
+//                    let index = orderAndDepthTempSort[i].index
+//                    let splatPosition = splatBuffer.values[Int(index)].position
+//                    let xx = splatPosition.x * cameraWorldForward.x
+//                    let yy = splatPosition.y * cameraWorldForward.y
+//                    let zz = splatPosition.z * cameraWorldForward.z
+//                    orderAndDepthTempSort[i].depth = xx + yy + zz // splatPosition dot cameraWorldForward
+//                }
+//            }
+//
+//            if renderFrontToBack {
+//                orderAndDepthTempSort.sort { $0.depth < $1.depth }
+//            } else {
+//                orderAndDepthTempSort.sort { $0.depth > $1.depth }
+//            }
+//
+//            do {
+//                try splatBufferPrime.setCapacity(splatCount)
+//                splatBufferPrime.count = 0
+//                for newIndex in 0..<orderAndDepthTempSort.count {
+//                    let oldIndex = Int(orderAndDepthTempSort[newIndex].index)
+//                    splatBufferPrime.append(splatBuffer, fromIndex: oldIndex)
+//                }
+//
+//                swap(&splatBuffer, &splatBufferPrime)
+//            } catch {
+//                // TODO: report error
+//            }
+//        }
+//    }
 }
 
 extension SplatRenderer.Splat {
