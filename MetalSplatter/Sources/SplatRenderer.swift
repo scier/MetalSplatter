@@ -431,14 +431,20 @@ public class SplatRenderer {
                 onSortComplete?(-sortStartTime.timeIntervalSinceNow)
             }
 
-            for i in 0..<splatCount
-            {
-                let index = orderAndDepthTempSort[i].index
-                let splatPosition = self.splatBuffer.values[Int(index)].position
-                let splatPositionSimd = simd_float3(x: splatPosition.x, y: splatPosition.y, z: splatPosition.z)
-                if Constants.sortByDistance {
+            if Constants.sortByDistance {
+                for i in 0..<splatCount
+                {
+                    let index = orderAndDepthTempSort[i].index
+                    let splatPosition = self.splatBuffer.values[Int(index)].position
+                    let splatPositionSimd = simd_float3(x: splatPosition.x, y: splatPosition.y, z: splatPosition.z)
                     orderAndDepthTempSort[i].depth = simd_length_squared( splatPositionSimd - cameraWorldPosition )
-                } else {
+                }
+            } else {
+                for i in 0..<splatCount
+                {
+                    let index = orderAndDepthTempSort[i].index
+                    let splatPosition = self.splatBuffer.values[Int(index)].position
+                    let splatPositionSimd = simd_float3(x: splatPosition.x, y: splatPosition.y, z: splatPosition.z)
                     orderAndDepthTempSort[i].depth = simd_dot( splatPositionSimd, cameraWorldForward )
                 }
             }
