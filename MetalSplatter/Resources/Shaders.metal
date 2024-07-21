@@ -1,5 +1,6 @@
 #include <metal_stdlib>
 #include <simd/simd.h>
+#include <metal_math>
 
 using namespace metal;
 
@@ -162,7 +163,11 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
                           projectedCenter.z,
                           projectedCenter.w);
     out.relativePosition = kBoundsRadius * relativeCoordinates;
-    out.color = splat.color;
+    float gamma = 2.2;
+    out.color.rgb = pow(splat.color.rgb, half3(1.0/gamma));
+    out.color.a = splat.color.a;
+//    out.color = splat.color;
+
     return out;
 }
 
