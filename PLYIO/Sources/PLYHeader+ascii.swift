@@ -48,7 +48,7 @@ extension PLYHeader {
                     throw ASCIIDecodeError.headerUnknownKeyword(keywordString)
                 }
                 switch keyword {
-                case .ply, .comment:
+                case .ply, .comment, .obj_info:
                     return
                 case .format:
                     guard header == nil else {
