@@ -8,6 +8,7 @@ public struct PLYHeader: Equatable {
         case element = "element"
         case property = "property"
         case endHeader = "end_header"
+        case obj_info = "obj_info"
     }
 
     public enum Format: String, Equatable {
