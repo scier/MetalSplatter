@@ -4,7 +4,7 @@
 using namespace metal;
 
 constant const int kMaxViewCount = 2;
-constant static const half kBoundsRadius = 2;
+constant static const half kBoundsRadius = 3;
 constant static const half kBoundsRadiusSquared = kBoundsRadius*kBoundsRadius;
 
 enum BufferIndex: int32_t
@@ -109,9 +109,6 @@ void decomposeCovariance(float3 cov2D, thread float2 &v1, thread float2 &v2) {
     // Gaussian axes are orthogonal
     float2 eigenvector2 = float2(eigenvector1.y, -eigenvector1.x);
 
-    lambda1 *= 2;
-    lambda2 *= 2;
-
     v1 = eigenvector1 * sqrt(lambda1);
     v2 = eigenvector2 * sqrt(lambda2);
 }
@@ -173,7 +170,7 @@ fragment half4 splatFragmentShader(ColorInOut in [[stage_in]]) {
         discard_fragment();
     }
 
-    half alpha = exp(negativeVSquared) * in.color.a;
+    half alpha = exp(0.5 * negativeVSquared) * in.color.a;
     return half4(alpha * in.color.rgb, alpha);
 }
 
