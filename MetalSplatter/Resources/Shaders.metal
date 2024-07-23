@@ -117,7 +117,6 @@ void decomposeCovariance(float3 cov2D, thread float2 &v1, thread float2 &v2) {
 }
 
 vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
-                                    uint instanceID [[instance_id]],
                                     ushort amp_id [[amplification_id]],
                                     constant Splat* splatArray [[ buffer(BufferIndexSplat) ]],
                                     constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]]) {
@@ -125,7 +124,7 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
 
     Uniforms uniforms = uniformsArray.uniforms[min(int(amp_id), kMaxViewCount)];
 
-    Splat splat = splatArray[instanceID];
+    Splat splat = splatArray[vertexID / 4];
     float4 viewPosition4 = uniforms.viewMatrix * float4(splat.position, 1);
     float3 viewPosition3 = viewPosition4.xyz;
 
@@ -149,7 +148,7 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
     }
 
     const half2 relativeCoordinatesArray[] = { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } };
-    half2 relativeCoordinates = relativeCoordinatesArray[vertexID];
+    half2 relativeCoordinates = relativeCoordinatesArray[vertexID % 4];
     half2 screenSizeFloat = half2(uniforms.screenSize.x, uniforms.screenSize.y);
     half2 projectedScreenDelta =
         (relativeCoordinates.x * half2(axis1) + relativeCoordinates.y * half2(axis2))

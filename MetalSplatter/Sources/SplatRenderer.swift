@@ -149,6 +149,8 @@ public class SplatRenderer {
     // TODO: Replace this with a more robust multiple-buffer scheme to guarantee we're never actively sorting a buffer still in use for rendering
     var splatBufferPrime: MetalBuffer<Splat>
 
+    var indexBuffer: (any MTLBuffer)?
+
     public var splatCount: Int { splatBuffer.count }
 
     var sorting = false
@@ -378,6 +380,21 @@ public class SplatRenderer {
                                           renderTargetArrayLength: renderTargetArrayLength,
                                           for: commandBuffer)
 
+        let indexCount = splatBuffer.count * 6
+        let indexBuffer = self.indexBuffer ?? device.makeBuffer(length: indexCount * MemoryLayout<UInt32>.size)!
+        if indexBuffer == nil {
+            let uint32Buffer = indexBuffer.contents().assumingMemoryBound(to: UInt32.self)
+            for i in 0..<splatBuffer.count {
+                uint32Buffer[i * 6 + 0] = UInt32(i * 4 + 0)
+                uint32Buffer[i * 6 + 1] = UInt32(i * 4 + 1)
+                uint32Buffer[i * 6 + 2] = UInt32(i * 4 + 2)
+                uint32Buffer[i * 6 + 3] = UInt32(i * 4 + 1)
+                uint32Buffer[i * 6 + 4] = UInt32(i * 4 + 2)
+                uint32Buffer[i * 6 + 5] = UInt32(i * 4 + 3)
+            }
+            self.indexBuffer = indexBuffer
+        }
+
         renderEncoder.pushDebugGroup("Draw Splat Model")
 
         renderEncoder.setRenderPipelineState(renderPipelineState)
@@ -386,10 +403,11 @@ public class SplatRenderer {
         renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: BufferIndex.splat.rawValue)
 
-        renderEncoder.drawPrimitives(type: .triangleStrip,
-                                     vertexStart: 0,
-                                     vertexCount: 4,
-                                     instanceCount: splatBuffer.count)
+        renderEncoder.drawIndexedPrimitives(type: .triangle,
+                                            indexCount: indexCount,
+                                            indexType: .uint32,
+                                            indexBuffer: indexBuffer,
+                                            indexBufferOffset: 0)
 
         renderEncoder.popDebugGroup()
         renderEncoder.endEncoding()
