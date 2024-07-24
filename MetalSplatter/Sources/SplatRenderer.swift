@@ -382,7 +382,7 @@ public class SplatRenderer {
 
         let indexCount = splatBuffer.count * 6
         let indexBuffer = self.indexBuffer ?? device.makeBuffer(length: indexCount * MemoryLayout<UInt32>.size)!
-        if indexBuffer == nil {
+        if self.indexBuffer == nil {
             let uint32Buffer = indexBuffer.contents().assumingMemoryBound(to: UInt32.self)
             for i in 0..<splatBuffer.count {
                 uint32Buffer[i * 6 + 0] = UInt32(i * 4 + 0)
