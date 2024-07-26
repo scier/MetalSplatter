@@ -54,6 +54,7 @@ typedef struct
     half4 projectedPosition;
     half2 scaledAxis1;
     half2 scaledAxis2;
+    half4 color;
 } PreprocessedSplat;
 
 typedef struct
@@ -172,12 +173,12 @@ kernel void splatPreprocessShader(constant UniformsArray& uniformsArray [[ buffe
                                                                       uniforms.screenSize.y);
     result.scaledAxis1 = half2(axis1) * axisScale;
     result.scaledAxis2 = half2(axis2) * axisScale;
+    result.color = splat.color;
 
     preprocessedSplatArray[viewID * uniforms.splatCount + splatID] = result;
 }
 
 vertex ColorInOut splatVertexShader(constant UniformsArray& uniformsArray [[ buffer(VertexBufferIndexUniforms) ]],
-                                    constant Splat* splatArray [[ buffer(VertexBufferIndexSplat) ]],
                                     constant PreprocessedSplat* preprocessedSplatArray [[ buffer(VertexBufferIndexPreprocessedSplat) ]],
                                     uint vertexID [[vertex_id]],
                                     uint instanceID [[instance_id]],
@@ -193,7 +194,6 @@ vertex ColorInOut splatVertexShader(constant UniformsArray& uniformsArray [[ buf
     }
 
     PreprocessedSplat preprocessedSplat = preprocessedSplatArray[viewID * uniforms.splatCount + splatID];
-    Splat splat = splatArray[splatID];
     half4 projectedPosition = preprocessedSplat.projectedPosition;
 
     if (projectedPosition.z == 0) {
@@ -224,7 +224,7 @@ vertex ColorInOut splatVertexShader(constant UniformsArray& uniformsArray [[ buf
                           projectedPosition.y + projectedScreenDelta.y,
                           projectedPosition.z,
                           projectedPosition.w);
-    out.color = splat.color;
+    out.color = preprocessedSplat.color;
     return out;
 }
 

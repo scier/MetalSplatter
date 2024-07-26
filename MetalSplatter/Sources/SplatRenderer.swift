@@ -110,6 +110,7 @@ public class SplatRenderer {
         var projectedPosition: SIMD4<Float16>
         var scaledAxis1: SIMD2<Float16>
         var scaledAxis2: SIMD2<Float16>
+        var color: SIMD4<Float16>
     }
 
     struct SplatIndexAndDepth {
@@ -470,7 +471,6 @@ public class SplatRenderer {
         renderEncoder.setDepthStencilState(depthState)
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: VertexBufferIndex.uniforms.rawValue)
-        renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: VertexBufferIndex.splat.rawValue)
         renderEncoder.setVertexBuffer(preprocessedSplatBuffer.buffer, offset: 0, index: VertexBufferIndex.preprocessedSplat.rawValue)
 
         renderEncoder.drawIndexedPrimitives(type: .triangle,
