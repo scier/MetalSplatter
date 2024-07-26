@@ -51,6 +51,7 @@ typedef struct
 
 typedef struct
 {
+    half4 projectedPosition;
     half2 scaledAxis1;
     half2 scaledAxis2;
 } PreprocessedSplat;
@@ -138,9 +139,10 @@ void decomposeCovariance(float3 cov2D, thread float2 &v1, thread float2 &v2) {
 kernel void splatPreprocessShader(constant UniformsArray& uniformsArray [[ buffer(PreprocessBufferIndexUniforms) ]],
                                   constant Splat* splatArray [[ buffer(PreprocessBufferIndexSplat) ]],
                                   device PreprocessedSplat* preprocessedSplatArray [[ buffer(PreprocessBufferIndexPreprocessedSplat) ]],
-                                  uint splatID [[thread_position_in_grid]]) {
-    const uint uniformID = 0;
-    Uniforms uniforms = uniformsArray.uniforms[min(int(uniformID), kMaxViewCount)];
+                                  uint2 threadPositionInGrid [[thread_position_in_grid]]) {
+    const uint splatID = threadPositionInGrid.x;
+    const uint viewID = threadPositionInGrid.y;
+    Uniforms uniforms = uniformsArray.uniforms[viewID];
 
     Splat splat = splatArray[splatID];
     float3 viewPosition = (uniforms.viewMatrix * float4(splat.position, 1)).xyz;
@@ -152,13 +154,26 @@ kernel void splatPreprocessShader(constant UniformsArray& uniformsArray [[ buffe
     float2 axis2;
     decomposeCovariance(cov2D, axis1, axis2);
 
-    half2 axisScale = half2(2 * kBoundsRadius / uniforms.screenSize.x,
-                            2 * kBoundsRadius / uniforms.screenSize.y);
+    half4 projectedPosition = half4(uniforms.projectionMatrix * uniforms.viewMatrix * float4(splat.position, 1));
+
+    float bounds = 1.2 * projectedPosition.w;
+    if (projectedPosition.z < -projectedPosition.w ||
+        projectedPosition.x < -bounds ||
+        projectedPosition.x > bounds ||
+        projectedPosition.y < -bounds ||
+        projectedPosition.y > bounds) {
+        projectedPosition = half4(1, 1, 0, 1);
+    }
+
     PreprocessedSplat result;
+    result.projectedPosition = projectedPosition;
+
+    half2 axisScale = 2 * kBoundsRadius * projectedPosition.w / half2(uniforms.screenSize.x,
+                                                                      uniforms.screenSize.y);
     result.scaledAxis1 = half2(axis1) * axisScale;
     result.scaledAxis2 = half2(axis2) * axisScale;
 
-    preprocessedSplatArray[splatID] = result;
+    preprocessedSplatArray[viewID * uniforms.splatCount + splatID] = result;
 }
 
 vertex ColorInOut splatVertexShader(constant UniformsArray& uniformsArray [[ buffer(VertexBufferIndexUniforms) ]],
@@ -166,10 +181,10 @@ vertex ColorInOut splatVertexShader(constant UniformsArray& uniformsArray [[ buf
                                     constant PreprocessedSplat* preprocessedSplatArray [[ buffer(VertexBufferIndexPreprocessedSplat) ]],
                                     uint vertexID [[vertex_id]],
                                     uint instanceID [[instance_id]],
-                                    ushort amplificationID [[amplification_id]]) {
+                                    ushort viewID [[amplification_id]]) {
     ColorInOut out;
 
-    Uniforms uniforms = uniformsArray.uniforms[min(int(amplificationID), kMaxViewCount)];
+    Uniforms uniforms = uniformsArray.uniforms[viewID];
 
     uint splatID = instanceID * uniforms.indexedSplatCount + (vertexID / 4);
     if (splatID >= uniforms.splatCount) {
@@ -177,28 +192,38 @@ vertex ColorInOut splatVertexShader(constant UniformsArray& uniformsArray [[ buf
         return out;
     }
 
+    PreprocessedSplat preprocessedSplat = preprocessedSplatArray[viewID * uniforms.splatCount + splatID];
     Splat splat = splatArray[splatID];
-    PreprocessedSplat preprocessedSplat = preprocessedSplatArray[splatID];
-    float4 projectedCenter = uniforms.projectionMatrix * uniforms.viewMatrix * float4(splat.position, 1);
+    half4 projectedPosition = preprocessedSplat.projectedPosition;
 
-    float bounds = 1.2 * projectedCenter.w;
-    if (projectedCenter.z < -projectedCenter.w ||
-        projectedCenter.x < -bounds ||
-        projectedCenter.x > bounds ||
-        projectedCenter.y < -bounds ||
-        projectedCenter.y > bounds) {
+    if (projectedPosition.z == 0) {
         out.position = float4(1, 1, 0, 1);
         return out;
     }
 
-    const half2 relativeCoordinatesArray[] = { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } };
-    half2 relativeCoordinates = relativeCoordinatesArray[vertexID % 4];
-    half2 projectedScreenDelta = relativeCoordinates.x * preprocessedSplat.scaledAxis1 + relativeCoordinates.y * preprocessedSplat.scaledAxis2;
-    out.position = float4(projectedCenter.x + projectedScreenDelta.x * projectedCenter.w,
-                          projectedCenter.y + projectedScreenDelta.y * projectedCenter.w,
-                          projectedCenter.z,
-                          projectedCenter.w);
-    out.relativePosition = kBoundsRadius * relativeCoordinates;
+    half2 projectedScreenDelta;
+    switch (vertexID % 4) {
+        case 0:
+            out.relativePosition = { -kBoundsRadius, -kBoundsRadius };
+            projectedScreenDelta = -preprocessedSplat.scaledAxis1 - preprocessedSplat.scaledAxis2;
+            break;
+        case 1:
+            out.relativePosition = { -kBoundsRadius,  kBoundsRadius };
+            projectedScreenDelta = -preprocessedSplat.scaledAxis1 + preprocessedSplat.scaledAxis2;
+            break;
+        case 2:
+            out.relativePosition = {  kBoundsRadius, -kBoundsRadius };
+            projectedScreenDelta =  preprocessedSplat.scaledAxis1 - preprocessedSplat.scaledAxis2;
+            break;
+        case 3:
+            out.relativePosition = {  kBoundsRadius,  kBoundsRadius };
+            projectedScreenDelta =  preprocessedSplat.scaledAxis1 + preprocessedSplat.scaledAxis2;
+            break;
+    }
+    out.position = float4(projectedPosition.x + projectedScreenDelta.x,
+                          projectedPosition.y + projectedScreenDelta.y,
+                          projectedPosition.z,
+                          projectedPosition.w);
     out.color = splat.color;
     return out;
 }

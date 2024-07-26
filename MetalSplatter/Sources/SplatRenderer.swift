@@ -107,6 +107,7 @@ public class SplatRenderer {
 
     // Keep in sync with Shaders.metal : PreprocessedSplat
     struct PreprocessedSplat {
+        var projectedPosition: SIMD4<Float16>
         var scaledAxis1: SIMD2<Float16>
         var scaledAxis2: SIMD2<Float16>
     }
@@ -163,7 +164,7 @@ public class SplatRenderer {
     var cameraWorldForward: SIMD3<Float> = .init(x: 0, y: 0, z: -1)
 
     typealias IndexType = UInt32
-    // splatBuffer and preprocessedSplatBuffer contain one entry for each gaussian splat
+    // splatBuffer contains one entry for each gaussian splat
     var splatBuffer: MetalBuffer<Splat>
     // splatBufferPrime is a copy of splatBuffer, which is not currenly in use for rendering.
     // We use this for sorting, and when we're done, swap it with splatBuffer.
@@ -171,6 +172,7 @@ public class SplatRenderer {
     // rendering.
     // TODO: Replace this with a more robust multiple-buffer scheme to guarantee we're never actively sorting a buffer still in use for rendering
     var splatBufferPrime: MetalBuffer<Splat>
+    // preprocessedSplatBuffer contains one entry for each gaussian splat per viewport
     var preprocessedSplatBuffer: MetalBuffer<PreprocessedSplat>
 
     var indexBuffer: MetalBuffer<UInt32>
@@ -297,7 +299,6 @@ public class SplatRenderer {
 
     public func ensureAdditionalCapacity(_ pointCount: Int) throws {
         try splatBuffer.ensureCapacity(splatBuffer.count + pointCount)
-        try preprocessedSplatBuffer.ensureCapacity(splatBuffer.count + pointCount)
     }
 
     public func add(_ points: [SplatScenePoint]) throws {
@@ -309,8 +310,6 @@ public class SplatRenderer {
         }
 
         splatBuffer.append(points.map { Splat($0) })
-        preprocessedSplatBuffer.append(Array(repeating: PreprocessedSplat(scaledAxis1: .init(x: 0, y: 0), scaledAxis2: .init(x: 0, y: 0)),
-                                             count: points.count))
     }
 
     public func add(_ point: SplatScenePoint) throws {
@@ -417,16 +416,23 @@ public class SplatRenderer {
         try? buildPipelinesIfNeeded()
         guard let preprocessPipelineState, let renderPipelineState, let depthState else { return }
 
+        let preprocessedSplatCount = splatCount * viewports.count
+        do {
+            try preprocessedSplatBuffer.setCapacity(preprocessedSplatCount)
+        } catch {
+            return
+        }
+
         let preprocessEncoder = commandBuffer.makeComputeCommandEncoder()!
         preprocessEncoder.setComputePipelineState(preprocessPipelineState)
         preprocessEncoder.setBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: PreprocessBufferIndex.uniforms.rawValue)
         preprocessEncoder.setBuffer(splatBuffer.buffer, offset: 0, index: PreprocessBufferIndex.splat.rawValue)
         preprocessEncoder.setBuffer(preprocessedSplatBuffer.buffer, offset: 0, index: PreprocessBufferIndex.preprocessedSplat.rawValue)
         if device.supportsFamily(.common3) {
-            preprocessEncoder.dispatchThreads(MTLSize(width: splatCount, height: 1, depth: 1),
+            preprocessEncoder.dispatchThreads(MTLSize(width: splatCount, height: viewports.count, depth: 1),
                                               threadsPerThreadgroup: MTLSize(width: preprocessPipelineState.maxTotalThreadsPerThreadgroup, height: 1, depth: 1))
         } else {
-            preprocessEncoder.dispatchThreadgroups(MTLSize(width: splatCount, height: 1, depth: 1),
+            preprocessEncoder.dispatchThreadgroups(MTLSize(width: splatCount, height: viewports.count, depth: 1),
                                                    threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
         }
         preprocessEncoder.endEncoding()
