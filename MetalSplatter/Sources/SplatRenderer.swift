@@ -404,13 +404,6 @@ public class SplatRenderer {
 
         let splatCount = splatBuffer.count
 
-        if orderAndDepthTempSort.count != splatCount {
-            orderAndDepthTempSort = Array(repeating: SplatIndexAndDepth(index: .max, depth: 0), count: splatCount)
-        }
-        for i in 0..<splatCount {
-            orderAndDepthTempSort[i].index = UInt32(i)
-        }
-
         let cameraWorldForward = cameraWorldForward
         let cameraWorldPosition = cameraWorldPosition
 
@@ -420,23 +413,21 @@ public class SplatRenderer {
                 onSortComplete?(-sortStartTime.timeIntervalSinceNow)
             }
 
+            if orderAndDepthTempSort.count != splatCount {
+                orderAndDepthTempSort = Array(repeating: SplatIndexAndDepth(index: .max, depth: 0), count: splatCount)
+            }
+
             if Constants.sortByDistance {
                 for i in 0..<splatCount {
-                    let index = orderAndDepthTempSort[i].index
-                    let splatPosition = splatBuffer.values[Int(index)].position
-                    let dx = splatPosition.x - cameraWorldPosition.x
-                    let dy = splatPosition.y - cameraWorldPosition.y
-                    let dz = splatPosition.z - cameraWorldPosition.z
-                    orderAndDepthTempSort[i].depth = dx*dx + dy*dy + dz*dz // (splatPosition - cameraWorldPosition).lengthSquared
+                    orderAndDepthTempSort[i].index = UInt32(i)
+                    let splatPosition = splatBuffer.values[i].position.simd
+                    orderAndDepthTempSort[i].depth = (splatPosition - cameraWorldPosition).lengthSquared
                 }
             } else {
                 for i in 0..<splatCount {
-                    let index = orderAndDepthTempSort[i].index
-                    let splatPosition = splatBuffer.values[Int(index)].position
-                    let xx = splatPosition.x * cameraWorldForward.x
-                    let yy = splatPosition.y * cameraWorldForward.y
-                    let zz = splatPosition.z * cameraWorldForward.z
-                    orderAndDepthTempSort[i].depth = xx + yy + zz // splatPosition dot cameraWorldForward
+                    orderAndDepthTempSort[i].index = UInt32(i)
+                    let splatPosition = splatBuffer.values[i].position.simd
+                    orderAndDepthTempSort[i].depth = dot(splatPosition, cameraWorldForward)
                 }
             }
 
@@ -498,6 +489,12 @@ extension Array where Element == SIMD3<Float> {
     var mean: SIMD3<Float>? {
         guard !isEmpty else { return nil }
         return reduce(.zero, +) / Float(count)
+    }
+}
+
+private extension MTLPackedFloat3 {
+    var simd: SIMD3<Float> {
+        SIMD3(x: x, y: y, z: z)
     }
 }
 
