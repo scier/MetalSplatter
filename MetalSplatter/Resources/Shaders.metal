@@ -18,6 +18,14 @@ typedef struct
     matrix_float4x4 projectionMatrix;
     matrix_float4x4 viewMatrix;
     uint2 screenSize;
+
+    /*
+     The first N splats are represented as as 2N primitives and 4N vertex indices. The remained are represented
+     as instanced of these first N. This allows us to limit the size of the indexed array (and associated memory),
+     but also avoid the performance penalty of a very large number of instances.
+     */
+    uint splatCount;
+    uint indexedSplatCount;
 } Uniforms;
 
 typedef struct
@@ -117,6 +125,7 @@ void decomposeCovariance(float3 cov2D, thread float2 &v1, thread float2 &v2) {
 }
 
 vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
+                                    uint instanceID [[instance_id]],
                                     ushort amp_id [[amplification_id]],
                                     constant Splat* splatArray [[ buffer(BufferIndexSplat) ]],
                                     constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]]) {
@@ -124,7 +133,13 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
 
     Uniforms uniforms = uniformsArray.uniforms[min(int(amp_id), kMaxViewCount)];
 
-    Splat splat = splatArray[vertexID / 4];
+    uint splatID = instanceID * uniforms.indexedSplatCount + (vertexID / 4);
+    if (splatID >= uniforms.splatCount) {
+        out.position = float4(1, 1, 0, 1);
+        return out;
+    }
+
+    Splat splat = splatArray[splatID];
     float4 viewPosition4 = uniforms.viewMatrix * float4(splat.position, 1);
     float3 viewPosition3 = viewPosition4.xyz;
 

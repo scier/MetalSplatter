@@ -17,6 +17,12 @@ public class SplatRenderer {
         // TODO: compare the behaviour and performance of sortByDistance
         // notes: sortByDistance introduces unstable artifacts when you get close to an object; whereas !sortByDistance introduces artifacts are you turn -- but they're a little subtler maybe?
         static let sortByDistance = true
+        // Only store indices for 1024 splats; for the remainder, use instancing of these existing indices.
+        // Setting to 1 uses only instancing (with a significant performance penalty); setting to a number higher than the splat count
+        // uses only indexing (with a significant memory penalty for th elarge index array, and a small performance penalty
+        // because that can't be cached as easiliy). Anywhere within an order of magnitude (or more?) of 1k seems to be the sweet spot,
+        // with effectively no memory penalty compated to instancing, and slightly better performance than even using all indexing.
+        static let maxIndexedSplatCount = 1024
     }
 
     private static let log =
@@ -48,6 +54,8 @@ public class SplatRenderer {
         var projectionMatrix: matrix_float4x4
         var viewMatrix: matrix_float4x4
         var screenSize: SIMD2<UInt32> // Size of screen in pixels
+        var splatCount: UInt32
+        var indexedSplatCount: UInt32
     }
 
     // Keep in sync with Shaders.metal : UniformsArray
@@ -149,7 +157,7 @@ public class SplatRenderer {
     // TODO: Replace this with a more robust multiple-buffer scheme to guarantee we're never actively sorting a buffer still in use for rendering
     var splatBufferPrime: MetalBuffer<Splat>
 
-    var indexBuffer: (any MTLBuffer)?
+    var indexBuffer: MetalBuffer<UInt32>
 
     public var splatCount: Int { splatBuffer.count }
 
@@ -184,6 +192,7 @@ public class SplatRenderer {
 
         self.splatBuffer = try MetalBuffer(device: device)
         self.splatBufferPrime = try MetalBuffer(device: device)
+        self.indexBuffer = try MetalBuffer(device: device)
 
         do {
             library = try device.makeDefaultLibrary(bundle: Bundle.module)
@@ -284,11 +293,15 @@ public class SplatRenderer {
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffers.contents() + uniformBufferOffset).bindMemory(to: UniformsArray.self, capacity: 1)
     }
 
-    private func updateUniforms(forViewports viewports: [ViewportDescriptor]) {
+    private func updateUniforms(forViewports viewports: [ViewportDescriptor],
+                                splatCount: UInt32,
+                                indexedSplatCount: UInt32) {
         for (i, viewport) in viewports.enumerated() where i <= maxViewCount {
             let uniforms = Uniforms(projectionMatrix: viewport.projectionMatrix,
                                     viewMatrix: viewport.viewMatrix,
-                                    screenSize: SIMD2(x: UInt32(viewport.screenSize.x), y: UInt32(viewport.screenSize.y)))
+                                    screenSize: SIMD2(x: UInt32(viewport.screenSize.x), y: UInt32(viewport.screenSize.y)),
+                                    splatCount: splatCount,
+                                    indexedSplatCount: indexedSplatCount)
             self.uniforms.pointee.setUniforms(index: i, uniforms)
         }
 
@@ -363,10 +376,13 @@ public class SplatRenderer {
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
                        to commandBuffer: MTLCommandBuffer) {
+        let splatCount = splatBuffer.count
         guard splatBuffer.count != 0 else { return }
+        let indexedSplatCount = min(splatCount, Constants.maxIndexedSplatCount)
+        let instanceCount = (splatCount + indexedSplatCount - 1) / indexedSplatCount
 
         switchToNextDynamicBuffer()
-        updateUniforms(forViewports: viewports)
+        updateUniforms(forViewports: viewports, splatCount: UInt32(splatCount), indexedSplatCount: UInt32(indexedSplatCount))
 
         try? buildPipelinesIfNeeded()
         guard let renderPipelineState, let depthState else { return }
@@ -380,19 +396,22 @@ public class SplatRenderer {
                                           renderTargetArrayLength: renderTargetArrayLength,
                                           for: commandBuffer)
 
-        let indexCount = splatBuffer.count * 6
-        let indexBuffer = self.indexBuffer ?? device.makeBuffer(length: indexCount * MemoryLayout<UInt32>.size)!
-        if self.indexBuffer == nil {
-            let uint32Buffer = indexBuffer.contents().assumingMemoryBound(to: UInt32.self)
-            for i in 0..<splatBuffer.count {
-                uint32Buffer[i * 6 + 0] = UInt32(i * 4 + 0)
-                uint32Buffer[i * 6 + 1] = UInt32(i * 4 + 1)
-                uint32Buffer[i * 6 + 2] = UInt32(i * 4 + 2)
-                uint32Buffer[i * 6 + 3] = UInt32(i * 4 + 1)
-                uint32Buffer[i * 6 + 4] = UInt32(i * 4 + 2)
-                uint32Buffer[i * 6 + 5] = UInt32(i * 4 + 3)
+        let indexCount = indexedSplatCount * 6
+        if indexBuffer.count < indexCount {
+            do {
+                try indexBuffer.ensureCapacity(indexCount)
+            } catch {
+                return
             }
-            self.indexBuffer = indexBuffer
+            indexBuffer.count = indexCount
+            for i in 0..<indexedSplatCount {
+                indexBuffer.values[i * 6 + 0] = UInt32(i * 4 + 0)
+                indexBuffer.values[i * 6 + 1] = UInt32(i * 4 + 1)
+                indexBuffer.values[i * 6 + 2] = UInt32(i * 4 + 2)
+                indexBuffer.values[i * 6 + 3] = UInt32(i * 4 + 1)
+                indexBuffer.values[i * 6 + 4] = UInt32(i * 4 + 2)
+                indexBuffer.values[i * 6 + 5] = UInt32(i * 4 + 3)
+            }
         }
 
         renderEncoder.pushDebugGroup("Draw Splat Model")
@@ -406,8 +425,9 @@ public class SplatRenderer {
         renderEncoder.drawIndexedPrimitives(type: .triangle,
                                             indexCount: indexCount,
                                             indexType: .uint32,
-                                            indexBuffer: indexBuffer,
-                                            indexBufferOffset: 0)
+                                            indexBuffer: indexBuffer.buffer,
+                                            indexBufferOffset: 0,
+                                            instanceCount: instanceCount)
 
         renderEncoder.popDebugGroup()
         renderEncoder.endEncoding()
