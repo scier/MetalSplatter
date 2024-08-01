@@ -121,6 +121,68 @@ void decomposeCovariance(float3 cov2D, thread float2 &v1, thread float2 &v2) {
     v2 = eigenvector2 * sqrt(lambda2);
 }
 
+using triangle_mesh_t = metal::mesh<ColorInOut, void, 4, 6, metal::topology::triangle>;
+
+[[ mesh ]]
+void splatMeshShader(triangle_mesh_t output_mesh,
+                     ushort amp_id [[amplification_id]],
+                     constant Splat* splatArray [[ buffer(BufferIndexSplat) ]],
+                     constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]],
+                     uint gid [[ thread_position_in_grid ]]) {
+    Uniforms uniforms = uniformsArray.uniforms[min(int(amp_id), kMaxViewCount)];
+
+    Splat splat = splatArray[gid];
+
+    float4 viewPosition4 = uniforms.viewMatrix * float4(splat.position, 1);
+    float4 projectedCenter = uniforms.projectionMatrix * viewPosition4;
+    float bounds = 1.2 * projectedCenter.w;
+    if (projectedCenter.z < -projectedCenter.w ||
+        projectedCenter.x < -bounds ||
+        projectedCenter.x > bounds ||
+        projectedCenter.y < -bounds ||
+        projectedCenter.y > bounds) {
+        output_mesh.set_primitive_count(0);
+        return;
+    }
+
+    output_mesh.set_index(0, 0);
+    output_mesh.set_index(1, 1);
+    output_mesh.set_index(2, 2);
+    output_mesh.set_index(3, 1);
+    output_mesh.set_index(4, 2);
+    output_mesh.set_index(5, 3);
+
+    float3 viewPosition3 = viewPosition4.xyz;
+    float3 cov2D = calcCovariance2D(viewPosition3, splat.covA, splat.covB,
+                                    uniforms.viewMatrix, uniforms.projectionMatrix, uniforms.screenSize);
+
+    float2 axis1;
+    float2 axis2;
+    decomposeCovariance(cov2D, axis1, axis2);
+
+    const half2 relativeCoordinatesArray[] = { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } };
+    for (int j=0; j<4; j++) {
+        half2 relativeCoordinates = relativeCoordinatesArray[j];
+        half2 screenSizeFloat = half2(uniforms.screenSize.x, uniforms.screenSize.y);
+        half2 projectedScreenDelta =
+            (relativeCoordinates.x * half2(axis1) + relativeCoordinates.y * half2(axis2))
+            * 2
+            * kBoundsRadius
+            / screenSizeFloat;
+
+        ColorInOut fragmentInput;
+        fragmentInput.position = float4(projectedCenter.x + projectedScreenDelta.x * projectedCenter.w,
+                                        projectedCenter.y + projectedScreenDelta.y * projectedCenter.w,
+                                        projectedCenter.z,
+                                        projectedCenter.w);
+        fragmentInput.relativePosition = kBoundsRadius * relativeCoordinates;
+        fragmentInput.color = splat.color;
+        output_mesh.set_vertex(j, fragmentInput);
+    }
+
+    output_mesh.set_primitive_count(6);
+}
+
 vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
                                     uint instanceID [[instance_id]],
                                     ushort amp_id [[amplification_id]],
