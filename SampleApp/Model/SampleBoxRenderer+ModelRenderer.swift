@@ -6,7 +6,6 @@ extension SampleBoxRenderer: ModelRenderer {
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
-                       stencilTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
                        to commandBuffer: MTLCommandBuffer) {
@@ -20,7 +19,6 @@ extension SampleBoxRenderer: ModelRenderer {
                colorTexture: colorTexture,
                colorStoreAction: colorStoreAction,
                depthTexture: depthTexture,
-               stencilTexture: stencilTexture,
                rasterizationRateMap: rasterizationRateMap,
                renderTargetArrayLength: renderTargetArrayLength,
                to: commandBuffer)

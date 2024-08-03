@@ -105,7 +105,6 @@ public class SplatRenderer {
     public let device: MTLDevice
     public let colorFormat: MTLPixelFormat
     public let depthFormat: MTLPixelFormat
-    public let stencilFormat: MTLPixelFormat
     public let sampleCount: Int
     public let maxViewCount: Int
     public let maxSimultaneousRenders: Int
@@ -167,7 +166,6 @@ public class SplatRenderer {
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
                 depthFormat: MTLPixelFormat,
-                stencilFormat: MTLPixelFormat,
                 sampleCount: Int,
                 maxViewCount: Int,
                 maxSimultaneousRenders: Int) throws {
@@ -179,7 +177,6 @@ public class SplatRenderer {
 
         self.colorFormat = colorFormat
         self.depthFormat = depthFormat
-        self.stencilFormat = stencilFormat
         self.sampleCount = sampleCount
         self.maxViewCount = min(maxViewCount, Constants.maxViewCount)
         self.maxSimultaneousRenders = maxSimultaneousRenders
@@ -254,7 +251,6 @@ public class SplatRenderer {
         pipelineDescriptor.colorAttachments[0] = colorAttachment
 
         pipelineDescriptor.depthAttachmentPixelFormat = depthFormat
-        pipelineDescriptor.stencilAttachmentPixelFormat = stencilFormat
 
         pipelineDescriptor.maxVertexAmplificationCount = maxViewCount
 
@@ -325,7 +321,6 @@ public class SplatRenderer {
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
-                       stencilTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
                        for commandBuffer: MTLCommandBuffer) -> MTLRenderCommandEncoder {
@@ -339,12 +334,6 @@ public class SplatRenderer {
             renderPassDescriptor.depthAttachment.loadAction = .clear
             renderPassDescriptor.depthAttachment.storeAction = storeDepth ? .store : .dontCare
             renderPassDescriptor.depthAttachment.clearDepth = 0.0
-        }
-        if let stencilTexture {
-            renderPassDescriptor.stencilAttachment.texture = stencilTexture
-            renderPassDescriptor.stencilAttachment.loadAction = .clear
-            renderPassDescriptor.stencilAttachment.storeAction = .dontCare
-            renderPassDescriptor.stencilAttachment.clearStencil = 0
         }
         renderPassDescriptor.rasterizationRateMap = rasterizationRateMap
         renderPassDescriptor.renderTargetArrayLength = renderTargetArrayLength
@@ -372,7 +361,6 @@ public class SplatRenderer {
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
-                       stencilTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
                        to commandBuffer: MTLCommandBuffer) {
@@ -391,7 +379,6 @@ public class SplatRenderer {
                                           colorTexture: colorTexture,
                                           colorStoreAction: colorStoreAction,
                                           depthTexture: depthTexture,
-                                          stencilTexture: stencilTexture,
                                           rasterizationRateMap: rasterizationRateMap,
                                           renderTargetArrayLength: renderTargetArrayLength,
                                           for: commandBuffer)

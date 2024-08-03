@@ -28,7 +28,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         self.commandQueue = queue
         self.metalKitView = metalKitView
         metalKitView.colorPixelFormat = MTLPixelFormat.bgra8Unorm_srgb
-        metalKitView.depthStencilPixelFormat = MTLPixelFormat.depth32Float_stencil8
+        metalKitView.depthStencilPixelFormat = MTLPixelFormat.depth32Float
         metalKitView.sampleCount = 1
         metalKitView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
     }
@@ -43,7 +43,6 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
             let splat = try await SplatRenderer(device: device,
                                                 colorFormat: metalKitView.colorPixelFormat,
                                                 depthFormat: metalKitView.depthStencilPixelFormat,
-                                                stencilFormat: metalKitView.depthStencilPixelFormat,
                                                 sampleCount: metalKitView.sampleCount,
                                                 maxViewCount: 1,
                                                 maxSimultaneousRenders: Constants.maxSimultaneousRenders)
@@ -53,7 +52,6 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
             modelRenderer = try! await SampleBoxRenderer(device: device,
                                                          colorFormat: metalKitView.colorPixelFormat,
                                                          depthFormat: metalKitView.depthStencilPixelFormat,
-                                                         stencilFormat: metalKitView.depthStencilPixelFormat,
                                                          sampleCount: metalKitView.sampleCount,
                                                          maxViewCount: 1,
                                                          maxSimultaneousRenders: Constants.maxSimultaneousRenders)
@@ -115,7 +113,6 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                              colorTexture: view.multisampleColorTexture ?? drawable.texture,
                              colorStoreAction: view.multisampleColorTexture == nil ? .store : .multisampleResolve,
                              depthTexture: view.depthStencilTexture,
-                             stencilTexture: view.depthStencilTexture,
                              rasterizationRateMap: nil,
                              renderTargetArrayLength: 0,
                              to: commandBuffer)

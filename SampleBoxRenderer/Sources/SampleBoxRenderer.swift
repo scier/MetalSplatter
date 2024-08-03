@@ -87,7 +87,6 @@ public class SampleBoxRenderer {
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
                 depthFormat: MTLPixelFormat,
-                stencilFormat: MTLPixelFormat,
                 sampleCount: Int,
                 maxViewCount: Int,
                 maxSimultaneousRenders: Int) throws {
@@ -107,7 +106,6 @@ public class SampleBoxRenderer {
             pipelineState = try Self.buildRenderPipelineWithDevice(device: device,
                                                                    colorFormat: colorFormat,
                                                                    depthFormat: depthFormat,
-                                                                   stencilFormat: stencilFormat,
                                                                    sampleCount: sampleCount,
                                                                    maxViewCount: self.maxViewCount,
                                                                    mtlVertexDescriptor: mtlVertexDescriptor)
@@ -156,7 +154,6 @@ public class SampleBoxRenderer {
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
-                       stencilTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
                        for commandBuffer: MTLCommandBuffer) -> MTLRenderCommandEncoder {
@@ -170,12 +167,6 @@ public class SampleBoxRenderer {
             renderPassDescriptor.depthAttachment.loadAction = .clear
             renderPassDescriptor.depthAttachment.storeAction = .store
             renderPassDescriptor.depthAttachment.clearDepth = 0.0
-        }
-        if let stencilTexture {
-            renderPassDescriptor.stencilAttachment.texture = stencilTexture
-            renderPassDescriptor.stencilAttachment.loadAction = .clear
-            renderPassDescriptor.stencilAttachment.storeAction = .dontCare
-            renderPassDescriptor.stencilAttachment.clearStencil = 0
         }
         renderPassDescriptor.rasterizationRateMap = rasterizationRateMap
         renderPassDescriptor.renderTargetArrayLength = renderTargetArrayLength
@@ -203,7 +194,6 @@ public class SampleBoxRenderer {
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
-                       stencilTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
                        to commandBuffer: MTLCommandBuffer) {
@@ -214,7 +204,6 @@ public class SampleBoxRenderer {
                                           colorTexture: colorTexture,
                                           colorStoreAction: colorStoreAction,
                                           depthTexture: depthTexture,
-                                          stencilTexture: stencilTexture,
                                           rasterizationRateMap: rasterizationRateMap,
                                           renderTargetArrayLength: renderTargetArrayLength,
                                           for: commandBuffer)
@@ -281,7 +270,6 @@ public class SampleBoxRenderer {
     private class func buildRenderPipelineWithDevice(device: MTLDevice,
                                                      colorFormat: MTLPixelFormat,
                                                      depthFormat: MTLPixelFormat,
-                                                     stencilFormat: MTLPixelFormat,
                                                      sampleCount: Int,
                                                      maxViewCount: Int,
                                                      mtlVertexDescriptor: MTLVertexDescriptor)
@@ -300,7 +288,6 @@ public class SampleBoxRenderer {
 
         pipelineDescriptor.colorAttachments[0].pixelFormat = colorFormat
         pipelineDescriptor.depthAttachmentPixelFormat = depthFormat
-        pipelineDescriptor.stencilAttachmentPixelFormat = stencilFormat
 
         pipelineDescriptor.maxVertexAmplificationCount = maxViewCount
 

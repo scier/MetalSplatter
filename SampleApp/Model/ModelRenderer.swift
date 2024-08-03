@@ -14,7 +14,6 @@ public protocol ModelRenderer {
                 colorTexture: MTLTexture,
                 colorStoreAction: MTLStoreAction,
                 depthTexture: MTLTexture?,
-                stencilTexture: MTLTexture?,
                 rasterizationRateMap: MTLRasterizationRateMap?,
                 renderTargetArrayLength: Int,
                 to commandBuffer: MTLCommandBuffer)

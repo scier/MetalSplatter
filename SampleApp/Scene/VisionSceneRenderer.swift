@@ -55,7 +55,6 @@ class VisionSceneRenderer {
             let splat = try SplatRenderer(device: device,
                                           colorFormat: layerRenderer.configuration.colorFormat,
                                           depthFormat: layerRenderer.configuration.depthFormat,
-                                          stencilFormat: .invalid,
                                           sampleCount: 1,
                                           maxViewCount: layerRenderer.properties.viewCount,
                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
@@ -67,7 +66,6 @@ class VisionSceneRenderer {
             modelRenderer = try! SampleBoxRenderer(device: device,
                                                    colorFormat: layerRenderer.configuration.colorFormat,
                                                    depthFormat: layerRenderer.configuration.depthFormat,
-                                                   stencilFormat: .invalid,
                                                    sampleCount: 1,
                                                    maxViewCount: layerRenderer.properties.viewCount,
                                                    maxSimultaneousRenders: Constants.maxSimultaneousRenders)
@@ -167,7 +165,6 @@ class VisionSceneRenderer {
                               colorTexture: drawable.colorTextures[0],
                               colorStoreAction: .store,
                               depthTexture: drawable.depthTextures[0],
-                              stencilTexture: nil,
                               rasterizationRateMap: drawable.rasterizationRateMaps.first,
                               renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
                               to: commandBuffer)
