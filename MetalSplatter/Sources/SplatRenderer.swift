@@ -363,7 +363,7 @@ public class SplatRenderer {
                        depthTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
-                       to commandBuffer: MTLCommandBuffer) {
+                       to commandBuffer: MTLCommandBuffer) throws {
         let splatCount = splatBuffer.count
         guard splatBuffer.count != 0 else { return }
         let indexedSplatCount = min(splatCount, Constants.maxIndexedSplatCount)

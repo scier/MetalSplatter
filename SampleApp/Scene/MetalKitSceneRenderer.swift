@@ -3,11 +3,16 @@
 import Metal
 import MetalKit
 import MetalSplatter
+import os
 import SampleBoxRenderer
 import simd
 import SwiftUI
 
 class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
+    private static let log =
+        Logger(subsystem: Bundle.main.bundleIdentifier!,
+               category: "MetalKitSceneRenderer")
+
     let metalKitView: MTKView
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
@@ -109,13 +114,17 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
         updateRotation()
 
-        modelRenderer.render(viewports: [viewport],
-                             colorTexture: view.multisampleColorTexture ?? drawable.texture,
-                             colorStoreAction: view.multisampleColorTexture == nil ? .store : .multisampleResolve,
-                             depthTexture: view.depthStencilTexture,
-                             rasterizationRateMap: nil,
-                             renderTargetArrayLength: 0,
-                             to: commandBuffer)
+        do {
+            try modelRenderer.render(viewports: [viewport],
+                                     colorTexture: view.multisampleColorTexture ?? drawable.texture,
+                                     colorStoreAction: view.multisampleColorTexture == nil ? .store : .multisampleResolve,
+                                     depthTexture: view.depthStencilTexture,
+                                     rasterizationRateMap: nil,
+                                     renderTargetArrayLength: 0,
+                                     to: commandBuffer)
+        } catch {
+            Self.log.error("Unable to render scene: \(error.localizedDescription)")
+        }
 
         commandBuffer.present(drawable)
 

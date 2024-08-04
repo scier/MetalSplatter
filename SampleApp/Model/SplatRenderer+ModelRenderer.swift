@@ -8,19 +8,19 @@ extension SplatRenderer: ModelRenderer {
                        depthTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
-                       to commandBuffer: MTLCommandBuffer) {
+                       to commandBuffer: MTLCommandBuffer) throws {
         let remappedViewports = viewports.map { viewport -> ViewportDescriptor in
             ViewportDescriptor(viewport: viewport.viewport,
                                projectionMatrix: viewport.projectionMatrix,
                                viewMatrix: viewport.viewMatrix,
                                screenSize: viewport.screenSize)
         }
-        render(viewports: remappedViewports,
-               colorTexture: colorTexture,
-               colorStoreAction: colorStoreAction,
-               depthTexture: depthTexture,
-               rasterizationRateMap: rasterizationRateMap,
-               renderTargetArrayLength: renderTargetArrayLength,
-               to: commandBuffer)
+        try render(viewports: remappedViewports,
+                   colorTexture: colorTexture,
+                   colorStoreAction: colorStoreAction,
+                   depthTexture: depthTexture,
+                   rasterizationRateMap: rasterizationRateMap,
+                   renderTargetArrayLength: renderTargetArrayLength,
+                   to: commandBuffer)
     }
 }

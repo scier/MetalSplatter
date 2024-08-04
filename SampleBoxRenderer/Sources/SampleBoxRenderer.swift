@@ -196,7 +196,7 @@ public class SampleBoxRenderer {
                        depthTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
-                       to commandBuffer: MTLCommandBuffer) {
+                       to commandBuffer: MTLCommandBuffer) throws {
         updateDynamicBufferState()
         updateUniforms(forViewports: viewports)
 

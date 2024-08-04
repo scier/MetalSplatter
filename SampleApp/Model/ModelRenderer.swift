@@ -16,5 +16,5 @@ public protocol ModelRenderer {
                 depthTexture: MTLTexture?,
                 rasterizationRateMap: MTLRasterizationRateMap?,
                 renderTargetArrayLength: Int,
-                to commandBuffer: MTLCommandBuffer)
+                to commandBuffer: MTLCommandBuffer) throws
 }

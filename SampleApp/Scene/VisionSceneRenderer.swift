@@ -19,7 +19,7 @@ extension LayerRenderer.Clock.Instant.Duration {
 class VisionSceneRenderer {
     private static let log =
         Logger(subsystem: Bundle.main.bundleIdentifier!,
-               category: "CompsitorServicesSceneRenderer")
+               category: "VisionSceneRenderer")
 
     let layerRenderer: LayerRenderer
     let device: MTLDevice
@@ -161,13 +161,17 @@ class VisionSceneRenderer {
 
         let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
 
-        modelRenderer?.render(viewports: viewports,
-                              colorTexture: drawable.colorTextures[0],
-                              colorStoreAction: .store,
-                              depthTexture: drawable.depthTextures[0],
-                              rasterizationRateMap: drawable.rasterizationRateMaps.first,
-                              renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
-                              to: commandBuffer)
+        do {
+            try modelRenderer?.render(viewports: viewports,
+                                      colorTexture: drawable.colorTextures[0],
+                                      colorStoreAction: .store,
+                                      depthTexture: drawable.depthTextures[0],
+                                      rasterizationRateMap: drawable.rasterizationRateMaps.first,
+                                      renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
+                                      to: commandBuffer)
+        } catch {
+            Self.log.error("Unable to render scene: \(error.localizedDescription)")
+        }
 
         drawable.encodePresent(commandBuffer: commandBuffer)
 
