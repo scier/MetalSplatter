@@ -117,14 +117,6 @@ public class SplatRenderer {
         }
     }
 
-    public var renderFrontToBack: Bool = false {
-        didSet {
-            if renderFrontToBack != oldValue {
-                resetPipelines()
-            }
-        }
-    }
-
     public var clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
 
     public var onSortStart: (() -> Void)?
@@ -237,17 +229,10 @@ public class SplatRenderer {
         colorAttachment.isBlendingEnabled = true
         colorAttachment.rgbBlendOperation = .add
         colorAttachment.alphaBlendOperation = .add
-        if renderFrontToBack {
-            colorAttachment.sourceRGBBlendFactor = .oneMinusDestinationAlpha
-            colorAttachment.sourceAlphaBlendFactor = .oneMinusDestinationAlpha
-            colorAttachment.destinationRGBBlendFactor = .one
-            colorAttachment.destinationAlphaBlendFactor = .one
-        } else {
-            colorAttachment.sourceRGBBlendFactor = .one
-            colorAttachment.sourceAlphaBlendFactor = .one
-            colorAttachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
-            colorAttachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        }
+        colorAttachment.sourceRGBBlendFactor = .one
+        colorAttachment.sourceAlphaBlendFactor = .one
+        colorAttachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        colorAttachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         pipelineDescriptor.colorAttachments[0] = colorAttachment
 
         pipelineDescriptor.depthAttachmentPixelFormat = depthFormat
@@ -456,11 +441,7 @@ public class SplatRenderer {
                 }
             }
 
-            if renderFrontToBack {
-                orderAndDepthTempSort.sort { $0.depth < $1.depth }
-            } else {
-                orderAndDepthTempSort.sort { $0.depth > $1.depth }
-            }
+            orderAndDepthTempSort.sort { $0.depth > $1.depth }
 
             do {
                 try splatBufferPrime.setCapacity(splatCount)
