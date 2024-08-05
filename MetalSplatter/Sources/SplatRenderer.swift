@@ -23,6 +23,8 @@ public class SplatRenderer {
         // because that can't be cached as easiliy). Anywhere within an order of magnitude (or more?) of 1k seems to be the sweet spot,
         // with effectively no memory penalty compated to instancing, and slightly better performance than even using all indexing.
         static let maxIndexedSplatCount = 1024
+
+        static let tileSize = MTLSize(width: 32, height: 32, depth: 1)
     }
 
     private static let log =
@@ -54,6 +56,7 @@ public class SplatRenderer {
         var projectionMatrix: matrix_float4x4
         var viewMatrix: matrix_float4x4
         var screenSize: SIMD2<UInt32> // Size of screen in pixels
+
         var splatCount: UInt32
         var indexedSplatCount: UInt32
     }
@@ -109,12 +112,26 @@ public class SplatRenderer {
     public let maxViewCount: Int
     public let maxSimultaneousRenders: Int
 
-    public var storeDepth: Bool = false {
-        didSet {
-            if storeDepth != oldValue {
-                resetPipelines()
-            }
-        }
+    /**
+     High-quality depth takes longer, but results in a continuous, more-representative depth buffer result, which is useful for reducing artifacts during Vision Pro's frame reprojection.
+     */
+    public var highQualityDepth: Bool = true
+
+    private var writeDepth: Bool {
+        depthFormat != .invalid
+    }
+
+    /**
+     The SplatRenderer has two shader pipelines.
+     - The single stage has a vertex shader, and a fragment shader. It can produce depth (or not), but the depth it produces is the depth of the nearest splat, whether it's visible or now.
+     - The multi-stage pipeline uses a set of shaders which communicate using imageblock tile memory: initialization (which clears the tile memory), draw splats (similar to the single-stage
+     pipeline but the end result is tile memory, not color+depth), and a post-process stage which merely copies the tile memory (color and optionally depth) to the frame's buffers.
+     This is neccessary so that the primary stage can do its own blending -- of both color and depth -- by reading the previous values and writing new ones, which isn't possible without tile
+     memory. Color blending works the same as the hardcoded path, but depth blending uses color alpha and results in mostly-transparent splats contributing only slightly to the depth,
+     resulting in a much more continuous and representative depth value, which is important for reprojection on Vision Pro.
+     */
+    private var useMultiStagePipeline: Bool {
+        writeDepth && highQualityDepth
     }
 
     public var clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
@@ -123,8 +140,15 @@ public class SplatRenderer {
     public var onSortComplete: ((TimeInterval) -> Void)?
 
     private let library: MTLLibrary
-    private var renderPipelineState: MTLRenderPipelineState?
-    private var depthState: MTLDepthStencilState?
+    // Single-stage pipeline
+    private var singleStagePipelineState: MTLRenderPipelineState?
+    private var singleStageDepthState: MTLDepthStencilState?
+    // Multi-stage pipeline
+    private var initializePipelineState: MTLRenderPipelineState?
+    private var drawSplatPipelineState: MTLRenderPipelineState?
+    private var drawSplatDepthState: MTLDepthStencilState?
+    private var postprocessPipelineState: MTLRenderPipelineState?
+    private var postprocessDepthState: MTLDepthStencilState?
 
     // dynamicUniformBuffers contains maxSimultaneousRenders uniforms buffers,
     // which we round-robin through, one per render; this is managed by switchToNextDynamicBuffer.
@@ -201,26 +225,40 @@ public class SplatRenderer {
         try add(newPoints.points)
     }
 
-    private func resetPipelines() {
-        renderPipelineState = nil
-        depthState = nil
+    private func resetPipelineStates() {
+        singleStagePipelineState = nil
+        initializePipelineState = nil
+        drawSplatPipelineState = nil
+        drawSplatDepthState = nil
+        postprocessPipelineState = nil
+        postprocessDepthState = nil
     }
 
-    private func buildPipelinesIfNeeded() throws {
-        if renderPipelineState == nil {
-            renderPipelineState = try buildRenderPipeline()
-        }
-        if depthState == nil {
-            depthState = try buildDepthState()
-        }
+    private func buildSingleStagePipelineStatesIfNeeded() throws {
+        guard singleStagePipelineState == nil else { return }
+
+        singleStagePipelineState = try buildSingleStagePipelineState()
+        singleStageDepthState = try buildSingleStageDepthState()
     }
 
-    private func buildRenderPipeline() throws -> MTLRenderPipelineState {
+    private func buildMultiStagePipelineStatesIfNeeded() throws {
+        guard initializePipelineState == nil else { return }
+
+        initializePipelineState = try buildInitializePipelineState()
+        drawSplatPipelineState = try buildDrawSplatPipelineState()
+        drawSplatDepthState = try buildDrawSplatDepthState()
+        postprocessPipelineState = try buildPostprocessPipelineState()
+        postprocessDepthState = try buildPostprocessDepthState()
+    }
+
+    private func buildSingleStagePipelineState() throws -> MTLRenderPipelineState {
+        assert(!useMultiStagePipeline)
+
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
 
-        pipelineDescriptor.label = "RenderPipeline"
-        pipelineDescriptor.vertexFunction = library.makeRequiredFunction(name: "splatVertexShader")
-        pipelineDescriptor.fragmentFunction = library.makeRequiredFunction(name: "splatFragmentShader")
+        pipelineDescriptor.label = "SingleStagePipeline"
+        pipelineDescriptor.vertexFunction = library.makeRequiredFunction(name: "singleStageSplatVertexShader")
+        pipelineDescriptor.fragmentFunction = library.makeRequiredFunction(name: "singleStageSplatFragmentShader")
 
         pipelineDescriptor.rasterSampleCount = sampleCount
 
@@ -242,10 +280,83 @@ public class SplatRenderer {
         return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
     }
 
-    private func buildDepthState() throws -> MTLDepthStencilState {
+    private func buildSingleStageDepthState() throws -> MTLDepthStencilState {
+        assert(!useMultiStagePipeline)
+
         let depthStateDescriptor = MTLDepthStencilDescriptor()
         depthStateDescriptor.depthCompareFunction = MTLCompareFunction.always
-        depthStateDescriptor.isDepthWriteEnabled = storeDepth
+        depthStateDescriptor.isDepthWriteEnabled = writeDepth
+        return device.makeDepthStencilState(descriptor: depthStateDescriptor)!
+    }
+
+    private func buildInitializePipelineState() throws -> MTLRenderPipelineState {
+        assert(useMultiStagePipeline)
+
+        let pipelineDescriptor = MTLTileRenderPipelineDescriptor()
+
+        pipelineDescriptor.label = "InitializePipeline"
+        pipelineDescriptor.tileFunction = library.makeRequiredFunction(name: "initializeFragmentStore")
+        pipelineDescriptor.threadgroupSizeMatchesTileSize = true;
+        pipelineDescriptor.colorAttachments[0].pixelFormat = colorFormat
+
+        return try device.makeRenderPipelineState(tileDescriptor: pipelineDescriptor, options: [], reflection: nil)
+    }
+
+    private func buildDrawSplatPipelineState() throws -> MTLRenderPipelineState {
+        assert(useMultiStagePipeline)
+
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+
+        pipelineDescriptor.label = "DrawSplatPipeline"
+        pipelineDescriptor.vertexFunction = library.makeRequiredFunction(name: "multiStageSplatVertexShader")
+        pipelineDescriptor.fragmentFunction = library.makeRequiredFunction(name: "multiStageSplatFragmentShader")
+
+        pipelineDescriptor.rasterSampleCount = sampleCount
+
+        pipelineDescriptor.colorAttachments[0].pixelFormat = colorFormat
+        pipelineDescriptor.depthAttachmentPixelFormat = depthFormat
+
+        pipelineDescriptor.maxVertexAmplificationCount = maxViewCount
+
+        return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+    }
+
+    private func buildDrawSplatDepthState() throws -> MTLDepthStencilState {
+        assert(useMultiStagePipeline)
+
+        let depthStateDescriptor = MTLDepthStencilDescriptor()
+        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.always
+        depthStateDescriptor.isDepthWriteEnabled = writeDepth
+        return device.makeDepthStencilState(descriptor: depthStateDescriptor)!
+    }
+
+    private func buildPostprocessPipelineState() throws -> MTLRenderPipelineState {
+        assert(useMultiStagePipeline)
+
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+
+        pipelineDescriptor.label = "PostprocessPipeline"
+        pipelineDescriptor.vertexFunction =
+            library.makeRequiredFunction(name: "postprocessVertexShader")
+        pipelineDescriptor.fragmentFunction =
+            writeDepth
+            ? library.makeRequiredFunction(name: "postprocessFragmentShader")
+            : library.makeRequiredFunction(name: "postprocessFragmentShaderNoDepth")
+
+        pipelineDescriptor.colorAttachments[0]!.pixelFormat = colorFormat
+        pipelineDescriptor.depthAttachmentPixelFormat = depthFormat
+
+        pipelineDescriptor.maxVertexAmplificationCount = maxViewCount
+
+        return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+    }
+
+    private func buildPostprocessDepthState() throws -> MTLDepthStencilState {
+        assert(useMultiStagePipeline)
+
+        let depthStateDescriptor = MTLDepthStencilDescriptor()
+        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.always
+        depthStateDescriptor.isDepthWriteEnabled = writeDepth
         return device.makeDepthStencilState(descriptor: depthStateDescriptor)!
     }
 
@@ -302,7 +413,8 @@ public class SplatRenderer {
         (view.inverse * SIMD4<Float>(x: 0, y: 0, z: 0, w: 1)).xyz
     }
 
-    func renderEncoder(viewports: [ViewportDescriptor],
+    func renderEncoder(multiStage: Bool,
+                       viewports: [ViewportDescriptor],
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
@@ -317,11 +429,22 @@ public class SplatRenderer {
         if let depthTexture {
             renderPassDescriptor.depthAttachment.texture = depthTexture
             renderPassDescriptor.depthAttachment.loadAction = .clear
-            renderPassDescriptor.depthAttachment.storeAction = storeDepth ? .store : .dontCare
+            renderPassDescriptor.depthAttachment.storeAction = .store
             renderPassDescriptor.depthAttachment.clearDepth = 0.0
         }
         renderPassDescriptor.rasterizationRateMap = rasterizationRateMap
         renderPassDescriptor.renderTargetArrayLength = renderTargetArrayLength
+
+        renderPassDescriptor.tileWidth  = Constants.tileSize.width
+        renderPassDescriptor.tileHeight = Constants.tileSize.height
+
+        if multiStage {
+            if let initializePipelineState {
+                renderPassDescriptor.imageblockSampleLength = initializePipelineState.imageblockSampleLength
+            } else {
+                Self.log.error("initializePipeline == nil in renderEncoder()")
+            }
+        }
 
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             fatalError("Failed to create render encoder")
@@ -357,10 +480,15 @@ public class SplatRenderer {
         switchToNextDynamicBuffer()
         updateUniforms(forViewports: viewports, splatCount: UInt32(splatCount), indexedSplatCount: UInt32(indexedSplatCount))
 
-        try? buildPipelinesIfNeeded()
-        guard let renderPipelineState, let depthState else { return }
+        let multiStage = useMultiStagePipeline
+        if multiStage {
+            try buildMultiStagePipelineStatesIfNeeded()
+        } else {
+            try buildSingleStagePipelineStatesIfNeeded()
+        }
 
-        let renderEncoder = renderEncoder(viewports: viewports,
+        let renderEncoder = renderEncoder(multiStage: multiStage,
+                                          viewports: viewports,
                                           colorTexture: colorTexture,
                                           colorStoreAction: colorStoreAction,
                                           depthTexture: depthTexture,
@@ -386,10 +514,27 @@ public class SplatRenderer {
             }
         }
 
-        renderEncoder.pushDebugGroup("Draw Splat Model")
+        if multiStage {
+            guard let initializePipelineState,
+                  let drawSplatPipelineState
+            else { return }
 
-        renderEncoder.setRenderPipelineState(renderPipelineState)
-        renderEncoder.setDepthStencilState(depthState)
+            renderEncoder.pushDebugGroup("Initialize")
+            renderEncoder.setRenderPipelineState(initializePipelineState)
+            renderEncoder.dispatchThreadsPerTile(Constants.tileSize)
+            renderEncoder.popDebugGroup()
+
+            renderEncoder.pushDebugGroup("Draw Splats")
+            renderEncoder.setRenderPipelineState(drawSplatPipelineState)
+            renderEncoder.setDepthStencilState(drawSplatDepthState)
+        } else {
+            guard let singleStagePipelineState
+            else { return }
+
+            renderEncoder.pushDebugGroup("Draw Splats")
+            renderEncoder.setRenderPipelineState(singleStagePipelineState)
+            renderEncoder.setDepthStencilState(singleStageDepthState)
+        }
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: BufferIndex.splat.rawValue)
@@ -401,7 +546,22 @@ public class SplatRenderer {
                                             indexBufferOffset: 0,
                                             instanceCount: instanceCount)
 
-        renderEncoder.popDebugGroup()
+        if multiStage {
+            guard let postprocessPipelineState
+            else { return }
+
+            renderEncoder.popDebugGroup()
+
+            renderEncoder.pushDebugGroup("Postprocess")
+            renderEncoder.setRenderPipelineState(postprocessPipelineState)
+            renderEncoder.setDepthStencilState(postprocessDepthState)
+            renderEncoder.setCullMode(.none)
+            renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            renderEncoder.popDebugGroup()
+        } else {
+            renderEncoder.popDebugGroup()
+        }
+
         renderEncoder.endEncoding()
     }
 

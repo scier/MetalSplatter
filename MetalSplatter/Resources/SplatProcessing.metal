@@ -1,52 +1,4 @@
-#include <metal_stdlib>
-#include <simd/simd.h>
-
-using namespace metal;
-
-constant const int kMaxViewCount = 2;
-constant static const half kBoundsRadius = 3;
-constant static const half kBoundsRadiusSquared = kBoundsRadius*kBoundsRadius;
-
-enum BufferIndex: int32_t
-{
-    BufferIndexUniforms = 0,
-    BufferIndexSplat    = 1,
-};
-
-typedef struct
-{
-    matrix_float4x4 projectionMatrix;
-    matrix_float4x4 viewMatrix;
-    uint2 screenSize;
-
-    /*
-     The first N splats are represented as as 2N primitives and 4N vertex indices. The remained are represented
-     as instanced of these first N. This allows us to limit the size of the indexed array (and associated memory),
-     but also avoid the performance penalty of a very large number of instances.
-     */
-    uint splatCount;
-    uint indexedSplatCount;
-} Uniforms;
-
-typedef struct
-{
-    Uniforms uniforms[kMaxViewCount];
-} UniformsArray;
-
-typedef struct
-{
-    packed_float3 position;
-    packed_half4 color;
-    packed_half3 covA;
-    packed_half3 covB;
-} Splat;
-
-typedef struct
-{
-    float4 position [[position]];
-    half2 relativePosition; // Ranges from -kBoundsRadius to +kBoundsRadius
-    half4 color;
-} ColorInOut;
+#import "SplatProcessing.h"
 
 float3 calcCovariance2D(float3 viewPos,
                         packed_half3 cov3Da,
@@ -121,22 +73,11 @@ void decomposeCovariance(float3 cov2D, thread float2 &v1, thread float2 &v2) {
     v2 = eigenvector2 * sqrt(lambda2);
 }
 
-vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
-                                    uint instanceID [[instance_id]],
-                                    ushort amp_id [[amplification_id]],
-                                    constant Splat* splatArray [[ buffer(BufferIndexSplat) ]],
-                                    constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]]) {
-    ColorInOut out;
+FragmentIn splatVertex(Splat splat,
+                       Uniforms uniforms,
+                       uint relativeVertexIndex) {
+    FragmentIn out;
 
-    Uniforms uniforms = uniformsArray.uniforms[min(int(amp_id), kMaxViewCount)];
-
-    uint splatID = instanceID * uniforms.indexedSplatCount + (vertexID / 4);
-    if (splatID >= uniforms.splatCount) {
-        out.position = float4(1, 1, 0, 1);
-        return out;
-    }
-
-    Splat splat = splatArray[splatID];
     float4 viewPosition4 = uniforms.viewMatrix * float4(splat.position, 1);
     float3 viewPosition3 = viewPosition4.xyz;
 
@@ -161,7 +102,7 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
     }
 
     const half2 relativeCoordinatesArray[] = { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } };
-    half2 relativeCoordinates = relativeCoordinatesArray[vertexID % 4];
+    half2 relativeCoordinates = relativeCoordinatesArray[relativeVertexIndex];
     half2 screenSizeFloat = half2(uniforms.screenSize.x, uniforms.screenSize.y);
     half2 projectedScreenDelta =
         (relativeCoordinates.x * half2(axis1) + relativeCoordinates.y * half2(axis2))
@@ -178,14 +119,7 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
     return out;
 }
 
-fragment half4 splatFragmentShader(ColorInOut in [[stage_in]]) {
-    half2 v = in.relativePosition;
-    half negativeVSquared = -dot(v, v);
-    if (negativeVSquared < -kBoundsRadiusSquared) {
-        discard_fragment();
-    }
-
-    half alpha = exp(0.5 * negativeVSquared) * in.color.a;
-    return half4(alpha * in.color.rgb, alpha);
+half splatFragmentAlpha(half2 relativePosition, half splatAlpha) {
+    half negativeMagnitudeSquared = -dot(relativePosition, relativePosition);
+    return (negativeMagnitudeSquared < -kBoundsRadiusSquared) ? 0 : exp(0.5 * negativeMagnitudeSquared) * splatAlpha;
 }
-
