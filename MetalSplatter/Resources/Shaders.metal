@@ -150,7 +150,8 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
     float4 projectedCenter = uniforms.projectionMatrix * viewPosition4;
 
     float bounds = 1.2 * projectedCenter.w;
-    if (projectedCenter.z < -projectedCenter.w ||
+    if (projectedCenter.z < 0.0 ||
+        projectedCenter.z > projectedCenter.w ||
         projectedCenter.x < -bounds ||
         projectedCenter.x > bounds ||
         projectedCenter.y < -bounds ||
