@@ -21,13 +21,14 @@ This is a Swift/Metal library for rendering scenes captured via the techniques d
 You're right, the documentation is entirely missing; it's a major TODO list item. In the meantime, feel free to try out the sample app -- just, like I said, don't expect much.
 
 1. Get yourself a gaussian splat PLY (or .splat) file.
-   a. Maybe download the [scene data from the original paper](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) or [Polycam's gallery](https://poly.cam/tools/gaussian-splatting)
-   b. Or use [Luma](https://lumalabs.ai), [Polycam](https://poly.cam/tools/gaussian-splatting) to capture and train your own
-   c. Go hardcode and train your own locally (here's [a great tutorial](https://www.reshot.ai/3d-gaussian-splatting)).
+   a. Capture one with [Luma AI's iPhone app](https://apps.apple.com/us/app/luma-ai/id1615849914), and then export in "splat" format
+   b. Or try the [scene data from the original paper](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/)
+   c. Go hardcore and learn to use [Nerfstudio](https://docs.nerf.studio/nerfology/methods/splat.html) to train your own locally
 2. Clone the repo and open SampleApp/MetalSplatter_SampleApp.xcodeproj
 3. If you want to run on iOS/visionOS, select your target and set your development team and bundle ID in Signing & Capabilities. On macOS, just have at it.
-4. Set your scheme to Release mode. Loading large files in Debug is more than an order of magnitude slower.
-5. Run it
+4. Make sure your scheme is set to Release mode. Loading large files in Debug is more than an order of magnitude slower.
+5. Run
+6. Note: framerate will be better if you run without the debugger attached (hit Stop in Xcode, and go run from the app from the Home screen)
 
 ## MetalSplatter Model Viewer
 
@@ -36,7 +37,7 @@ available on visionOS for Vision Pro (support for iOS/macOS is coming later). It
 
 ## Acknowledgements
 
-There are no external dependencies; and the basic math to render gaussian splats is straightforward (the basic representation has [been around for decades](https://en.wikipedia.org/wiki/Gaussian_splatting)), so there are a lot of great references around and I drew on a lot of 'em to try and understand how it works; there's really very little new here, the recent innovations are about training, not rendering. Nonetheless, I pretty much made every mistake possible while implementing it, and the existance of these three implementations was invaluable to help see what I was doing wrong:
+There are no external dependencies, but the math to render gaussian splats is straightforward (the basic representation has [been around for decades](https://en.wikipedia.org/wiki/Gaussian_splatting)), so there are a lot of great references around and I drew on a lot of 'em to try and understand how it works. There's really very little new here, the recent innovations are about training, not rendering. Nonetheless, I pretty much made every mistake possible while implementing it, and the existance of these three implementations was invaluable to help see what I was doing wrong:
 * [Kevin Kwok's WebGL implementation](https://github.com/antimatter15/splat)
 * [Aras Pranckevičius's Unity implementation](https://github.com/aras-p/UnityGaussianSplatting) and series of very insightful blog posts: [1](https://aras-p.info/blog/2023/09/05/Gaussian-Splatting-is-pretty-cool/), [2](https://aras-p.info/blog/2023/09/13/Making-Gaussian-Splats-smaller/), [3](https://aras-p.info/blog/2023/09/27/Making-Gaussian-Splats-more-smaller/)
 * The original paper's [reference implementation](https://github.com/graphdeco-inria/gaussian-splatting)
