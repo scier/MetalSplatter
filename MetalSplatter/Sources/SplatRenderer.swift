@@ -131,7 +131,11 @@ public class SplatRenderer {
      resulting in a much more continuous and representative depth value, which is important for reprojection on Vision Pro.
      */
     private var useMultiStagePipeline: Bool {
+#if targetEnvironment(simulator)
+        false
+#else
         writeDepth && highQualityDepth
+#endif
     }
 
     public var clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
