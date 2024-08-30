@@ -25,8 +25,12 @@ public class SplatPLYSceneReader: SplatSceneReader {
 
     private let ply: PLYReader
 
-    public convenience init(_ url: URL) {
-        self.init(PLYReader(url))
+    public convenience init(_ url: URL) throws {
+        self.init(try PLYReader(url))
+    }
+
+    public convenience init(_ inputStream: InputStream) {
+        self.init(PLYReader(inputStream))
     }
 
     public init(_ ply: PLYReader) {
@@ -54,19 +58,23 @@ private class SplatPLYSceneReaderStream {
             }
         }
     }
-    private var compressedPointElementMapping: CompressedPointElementMapping?
-    private var pointElementMapping: PointElementMapping?
+    private var compressedElementMapping: CompressedElementInputMapping?
+    private var elementMapping: ElementInputMapping?
     private var expectedPointCount: UInt32 = 0
     private var pointCount: UInt32 = 0
-    private var reusablePoint = SplatScenePoint(position: .zero, normal: .zero, color: .none, opacity: .zero, scale: .zero, rotation: .init(vector: .zero))
+    private var reusablePoint = SplatScenePoint(position: .zero,
+                                                color: .linearUInt8(.zero),
+                                                opacity: .linearFloat(.zero),
+                                                scale: .exponent(.zero),
+                                                rotation: .init(vector: .zero))
     private var isCompressed = false
     private var chunks = [Chunk]()
 
     func read(_ ply: PLYReader, to delegate: SplatSceneReaderDelegate) {
         self.delegate = delegate
         active = true
-        compressedPointElementMapping = nil
-        pointElementMapping = nil
+        compressedElementMapping = nil
+        elementMapping = nil
         expectedPointCount = 0
         pointCount = 0
 
@@ -79,25 +87,25 @@ private class SplatPLYSceneReaderStream {
 extension SplatPLYSceneReaderStream: PLYReaderDelegate {
     func didStartReading(withHeader header: PLYHeader) {
         guard active else { return }
-        guard pointElementMapping == nil else {
-            delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didStart called while pointElementMapping is non-nil"))
+        guard elementMapping == nil else {
+            delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didStart called while elementMapping is non-nil"))
             active = false
             return
         }
 
         do {
-            isCompressed = header.index(forElementNamed: CompressedPointElementMapping.ElementName.chunk.rawValue) != nil
+            isCompressed = header.index(forElementNamed: CompressedElementInputMapping.ElementName.chunk.rawValue) != nil
             if isCompressed {
-                let pointElementMapping = try CompressedPointElementMapping.pointElementMapping(for: header)
-                compressedPointElementMapping = pointElementMapping
-                expectedPointCount = header.elements[pointElementMapping.vertexTypeIndex].count
+                let elementMapping = try CompressedElementInputMapping.elementMapping(for: header)
+                compressedElementMapping = elementMapping
+                expectedPointCount = header.elements[elementMapping.vertexTypeIndex].count
             }
             else {
-                let pointElementMapping = try PointElementMapping.pointElementMapping(for: header)
-                self.pointElementMapping = pointElementMapping
-                expectedPointCount = header.elements[pointElementMapping.elementTypeIndex].count
+                let elementMapping = try ElementInputMapping.elementMapping(for: header)
+                self.elementMapping = elementMapping
+                expectedPointCount = header.elements[elementMapping.elementTypeIndex].count
             }
-            
+
             delegate?.didStartReading(withPointCount: expectedPointCount)
         } catch {
             delegate?.didFailReading(withError: error)
@@ -109,24 +117,24 @@ extension SplatPLYSceneReaderStream: PLYReaderDelegate {
     func didRead(element: PLYElement, typeIndex: Int, withHeader elementHeader: PLYHeader.Element) {
         guard active else { return }
         if isCompressed {
-            guard let compressedPointElementMapping else {
-                delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didRead(element:typeIndex:withHeader:) called but pointElementMapping is nil"))
+            guard let compressedElementMapping else {
+                delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didRead(element:typeIndex:withHeader:) called but elementMapping is nil"))
                 active = false
                 return
             }
             
             switch typeIndex {
-            case compressedPointElementMapping.chunkTypeIndex:
+            case compressedElementMapping.chunkTypeIndex:
                 do {
-                    let chunk = try compressedPointElementMapping.chunk(from: element)
+                    let chunk = try compressedElementMapping.chunk(from: element)
                     chunks.append(chunk)
                 } catch {
                     delegate?.didFailReading(withError: error)
                     active = false
                 }
-            case compressedPointElementMapping.vertexTypeIndex:
+            case compressedElementMapping.vertexTypeIndex:
                 do {
-                    try compressedPointElementMapping.apply(from: element, with: chunks[Int(pointCount)/256], to: &reusablePoint)
+                    try compressedElementMapping.apply(from: element, with: chunks[Int(pointCount)/256], to: &reusablePoint)
                     pointCount += 1
                     delegate?.didRead(points: [ reusablePoint ])
                 } catch {
@@ -139,20 +147,21 @@ extension SplatPLYSceneReaderStream: PLYReaderDelegate {
             return
         }
         
-        guard let pointElementMapping else {
-            delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didRead(element:typeIndex:withHeader:) called but pointElementMapping is nil"))
+        guard let elementMapping else {
+            delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didRead(element:typeIndex:withHeader:) called but elementMapping is nil"))
             active = false
             return
         }
 
-        guard typeIndex == pointElementMapping.elementTypeIndex else { return }
+        guard typeIndex == elementMapping.elementTypeIndex else { return }
         do {
-            try pointElementMapping.apply(from: element, to: &reusablePoint)
+            try elementMapping.apply(from: element, to: &reusablePoint)
             pointCount += 1
             delegate?.didRead(points: [ reusablePoint ])
         } catch {
             delegate?.didFailReading(withError: error)
             active = false
+            return
         }
     }
 
@@ -175,7 +184,138 @@ extension SplatPLYSceneReaderStream: PLYReaderDelegate {
     }
 }
 
-private struct CompressedPointElementMapping {
+private struct ElementInputMapping {
+    public enum Color {
+        case sphericalHarmonic([SIMD3<Int>])
+        case linearFloat256(SIMD3<Int>)
+        case linearUInt8(SIMD3<Int>)
+
+    }
+
+    static let sphericalHarmonicsCount = 45
+
+    let elementTypeIndex: Int
+
+    let positionXPropertyIndex: Int
+    let positionYPropertyIndex: Int
+    let positionZPropertyIndex: Int
+    let colorPropertyIndices: Color
+    let scaleXPropertyIndex: Int
+    let scaleYPropertyIndex: Int
+    let scaleZPropertyIndex: Int
+    let opacityPropertyIndex: Int
+    let rotation0PropertyIndex: Int
+    let rotation1PropertyIndex: Int
+    let rotation2PropertyIndex: Int
+    let rotation3PropertyIndex: Int
+
+    static func elementMapping(for header: PLYHeader) throws -> ElementInputMapping {
+        guard let elementTypeIndex = header.index(forElementNamed: SplatPLYConstants.ElementName.point.rawValue) else {
+            throw SplatPLYSceneReader.Error.unsupportedFileContents("No element type \"\(SplatPLYConstants.ElementName.point.rawValue)\" found")
+        }
+        let headerElement = header.elements[elementTypeIndex]
+
+        let positionXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.positionX)
+        let positionYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.positionY)
+        let positionZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.positionZ)
+
+        let color: Color
+        if let sh0_rPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_r),
+           let sh0_gPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_g),
+            let sh0_bPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_b) {
+            let primaryColorPropertyIndices = SIMD3<Int>(x: sh0_rPropertyIndex, y: sh0_gPropertyIndex, z: sh0_bPropertyIndex)
+            if headerElement.hasProperty(forName: "\(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)0") {
+                let individualSphericalHarmonicsPropertyIndices: [Int] = try (0..<sphericalHarmonicsCount).map {
+                    try headerElement.index(forFloat32PropertyNamed: [ "\(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)\($0)" ])
+                }
+                let sphericalHarmonicsPropertyIndices: [SIMD3<Int>] = stride(from: 0, to: individualSphericalHarmonicsPropertyIndices.count, by: 3).map {
+                    SIMD3<Int>(individualSphericalHarmonicsPropertyIndices[$0],
+                               individualSphericalHarmonicsPropertyIndices[$0 + 1],
+                               individualSphericalHarmonicsPropertyIndices[$0 + 2])
+                }
+                color = .sphericalHarmonic([primaryColorPropertyIndices] + sphericalHarmonicsPropertyIndices)
+            } else {
+                color = .sphericalHarmonic([primaryColorPropertyIndices])
+            }
+        } else if headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorR, type: .float32) &&
+                    headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorG, type: .float32) &&
+                    headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorB, type: .float32) {
+            // Special case for NRRFStudio SH=0 files. This may be fixed now?
+            let colorRPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorR, type: .float32)
+            let colorGPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorG, type: .float32)
+            let colorBPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorB, type: .float32)
+            color = .linearFloat256(SIMD3(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex))
+        } else if headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorR, type: .uint8) &&
+                    headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorG, type: .uint8) &&
+                    headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorB, type: .uint8) {
+            let colorRPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorR, type: .uint8)
+            let colorGPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorG, type: .uint8)
+            let colorBPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorB, type: .uint8)
+            color = .linearUInt8(SIMD3(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex))
+        } else {
+            throw SplatPLYSceneReader.Error.unsupportedFileContents("No color property elements found with the expected types")
+        }
+
+        let scaleXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.scaleX)
+        let scaleYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.scaleY)
+        let scaleZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.scaleZ)
+        let opacityPropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.opacity)
+
+        let rotation0PropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.rotation0)
+        let rotation1PropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.rotation1)
+        let rotation2PropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.rotation2)
+        let rotation3PropertyIndex = try headerElement.index(forFloat32PropertyNamed: SplatPLYConstants.PropertyName.rotation3)
+
+        return ElementInputMapping(elementTypeIndex: elementTypeIndex,
+                                   positionXPropertyIndex: positionXPropertyIndex,
+                                   positionYPropertyIndex: positionYPropertyIndex,
+                                   positionZPropertyIndex: positionZPropertyIndex,
+                                   colorPropertyIndices: color,
+                                   scaleXPropertyIndex: scaleXPropertyIndex,
+                                   scaleYPropertyIndex: scaleYPropertyIndex,
+                                   scaleZPropertyIndex: scaleZPropertyIndex,
+                                   opacityPropertyIndex: opacityPropertyIndex,
+                                   rotation0PropertyIndex: rotation0PropertyIndex,
+                                   rotation1PropertyIndex: rotation1PropertyIndex,
+                                   rotation2PropertyIndex: rotation2PropertyIndex,
+                                   rotation3PropertyIndex: rotation3PropertyIndex)
+    }
+
+    func apply(from element: PLYElement, to result: inout SplatScenePoint) throws {
+        result.position = SIMD3(x: try element.float32Value(forPropertyIndex: positionXPropertyIndex),
+                                y: try element.float32Value(forPropertyIndex: positionYPropertyIndex),
+                                z: try element.float32Value(forPropertyIndex: positionZPropertyIndex))
+
+        switch colorPropertyIndices {
+        case .sphericalHarmonic(let sphericalHarmonicsPropertyIndices):
+            result.color = .sphericalHarmonic(try sphericalHarmonicsPropertyIndices.map {
+                try SIMD3<Float>(x: element.float32Value(forPropertyIndex: $0.x),
+                                 y: element.float32Value(forPropertyIndex: $0.y),
+                                 z: element.float32Value(forPropertyIndex: $0.z))
+            })
+        case .linearFloat256(let propertyIndices):
+            result.color = .linearFloat256(SIMD3(try element.float32Value(forPropertyIndex: propertyIndices.x),
+                                                 try element.float32Value(forPropertyIndex: propertyIndices.y),
+                                                 try element.float32Value(forPropertyIndex: propertyIndices.z)))
+        case .linearUInt8(let propertyIndices):
+            result.color = .linearUInt8(SIMD3(try element.uint8Value(forPropertyIndex: propertyIndices.x),
+                                              try element.uint8Value(forPropertyIndex: propertyIndices.y),
+                                              try element.uint8Value(forPropertyIndex: propertyIndices.z)))
+        }
+
+        result.scale =
+            .exponent(SIMD3(try element.float32Value(forPropertyIndex: scaleXPropertyIndex),
+                            try element.float32Value(forPropertyIndex: scaleYPropertyIndex),
+                            try element.float32Value(forPropertyIndex: scaleZPropertyIndex)))
+        result.opacity = .logitFloat(try element.float32Value(forPropertyIndex: opacityPropertyIndex))
+        result.rotation.real   = try element.float32Value(forPropertyIndex: rotation0PropertyIndex)
+        result.rotation.imag.x = try element.float32Value(forPropertyIndex: rotation1PropertyIndex)
+        result.rotation.imag.y = try element.float32Value(forPropertyIndex: rotation2PropertyIndex)
+        result.rotation.imag.z = try element.float32Value(forPropertyIndex: rotation3PropertyIndex)
+    }
+}
+
+private struct CompressedElementInputMapping {
     enum ElementName: String {
         case chunk = "chunk"
         case vertex = "vertex"
@@ -223,7 +363,7 @@ private struct CompressedPointElementMapping {
     let packedScalePropertyIndex: Int
     let packedColorPropertyIndex: Int
     
-    static func pointElementMapping(for header: PLYHeader) throws -> CompressedPointElementMapping {
+    static func elementMapping(for header: PLYHeader) throws -> CompressedElementInputMapping {
         guard let chunkTypeIndex = header.index(forElementNamed: ElementName.chunk.rawValue) else {
             throw SplatPLYSceneReader.Error.unsupportedFileContents("No element type \"\(ElementName.chunk.rawValue)\" found")
         }
@@ -253,7 +393,7 @@ private struct CompressedPointElementMapping {
         let packedScalePropertyIndex = try vertexHeaderElement.index(forPropertyNamed: PropertyName.packedScale, type: .uint32)
         let packedColorPropertyIndex = try vertexHeaderElement.index(forPropertyNamed: PropertyName.packedColor, type: .uint32)
         
-        return CompressedPointElementMapping(chunkTypeIndex: chunkTypeIndex,
+        return CompressedElementInputMapping(chunkTypeIndex: chunkTypeIndex,
                                              vertexTypeIndex: vertexTypeIndex,
                                              positionMinXPropertyIndex: positionMinXPropertyIndex,
                                              positionMinYPropertyIndex: positionMinYPropertyIndex,
@@ -317,19 +457,20 @@ private struct CompressedPointElementMapping {
         let scaleY = unpackUnorm(packedScale >> 11, bits: 10)
         let scaleZ = unpackUnorm(packedScale, bits: 11)
         
-        result.scale.x = lerp(a: chunk.minScale.x, b: chunk.maxScale.x, t: scaleX)
-        result.scale.y = lerp(a: chunk.minScale.y, b: chunk.maxScale.y, t: scaleY)
-        result.scale.z = lerp(a: chunk.minScale.z, b: chunk.maxScale.z, t: scaleZ)
+        result.scale = .exponent(.init(x: lerp(a: chunk.minScale.x, b: chunk.maxScale.x, t: scaleX),
+                                       y: lerp(a: chunk.minScale.y, b: chunk.maxScale.y, t: scaleY),
+                                       z: lerp(a: chunk.minScale.z, b: chunk.maxScale.z, t: scaleZ)))
         
         let colorR = unpackUnorm(packedColor >> 24, bits: 8)
         let colorG = unpackUnorm(packedColor >> 16, bits: 8)
         let colorB = unpackUnorm(packedColor >> 8, bits: 8)
         let opacity = unpackUnorm(packedColor, bits: 8)
         
-        result.color = .firstOrderSphericalHarmonic((colorR - 0.5) / CompressedPointElementMapping.SH_C0,
-                                                    (colorG - 0.5) / CompressedPointElementMapping.SH_C0,
-                                                    (colorB - 0.5) / CompressedPointElementMapping.SH_C0)
-        result.opacity = -logf(1 / opacity - 1)
+        result.color = .sphericalHarmonic([.init(x: (colorR - 0.5) / CompressedElementInputMapping.SH_C0,
+                                                 y: (colorG - 0.5) / CompressedElementInputMapping.SH_C0,
+                                                 z: (colorB - 0.5) / CompressedElementInputMapping.SH_C0)])
+        
+        result.opacity = .logitFloat(-logf(1 / opacity - 1))
     }
     
     private func unpackUnorm(_ value: UInt32, bits: UInt) -> Float {
@@ -360,184 +501,6 @@ private struct CompressedPointElementMapping {
     
     private func lerp(a: Float, b: Float, t: Float) -> Float {
         return a * (1 - t) + b * t
-    }
-}
-
-private struct PointElementMapping {
-    enum ElementName: String {
-        case point = "vertex"
-    }
-
-    enum PropertyName {
-        static let positionX = [ "x" ]
-        static let positionY = [ "y" ]
-        static let positionZ = [ "z" ]
-        static let normalX = [ "nx", "nxx" ]
-        static let normalY = [ "ny" ]
-        static let normalZ = [ "nz" ]
-        static let sh0_r = [ "f_dc_0" ]
-        static let sh0_g = [ "f_dc_1" ]
-        static let sh0_b = [ "f_dc_2" ]
-        static let sphericalHarmonicsPrefix = "f_rest_"
-        static let colorR = [ "red" ]
-        static let colorG = [ "green" ]
-        static let colorB = [ "blue" ]
-        static let scaleX = [ "scale_0" ]
-        static let scaleY = [ "scale_1" ]
-        static let scaleZ = [ "scale_2" ]
-        static let opacity = [ "opacity" ]
-        static let rotation0 = [ "rot_0" ]
-        static let rotation1 = [ "rot_1" ]
-        static let rotation2 = [ "rot_2" ]
-        static let rotation3 = [ "rot_3" ]
-    }
-
-    public enum Color {
-        case sphericalHarmonic(Int, Int, Int, [Int])
-        case firstOrderSphericalHarmonic(Int, Int, Int)
-        case linearFloat(Int, Int, Int)
-        case linearUInt8(Int, Int, Int)
-    }
-
-    static let sphericalHarmonicsCount = 45
-
-    let elementTypeIndex: Int
-
-    let positionXPropertyIndex: Int
-    let positionYPropertyIndex: Int
-    let positionZPropertyIndex: Int
-    let normalXPropertyIndex: Int
-    let normalYPropertyIndex: Int
-    let normalZPropertyIndex: Int
-    let colorPropertyIndices: Color
-    let scaleXPropertyIndex: Int
-    let scaleYPropertyIndex: Int
-    let scaleZPropertyIndex: Int
-    let opacityPropertyIndex: Int
-    let rotation0PropertyIndex: Int
-    let rotation1PropertyIndex: Int
-    let rotation2PropertyIndex: Int
-    let rotation3PropertyIndex: Int
-
-    static func pointElementMapping(for header: PLYHeader) throws -> PointElementMapping {
-        
-        guard let elementTypeIndex = header.index(forElementNamed: ElementName.point.rawValue) else {
-            throw SplatPLYSceneReader.Error.unsupportedFileContents("No element type \"\(ElementName.point.rawValue)\" found")
-        }
-        let headerElement = header.elements[elementTypeIndex]
-
-        let positionXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionX)
-        let positionYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionY)
-        let positionZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.positionZ)
-        let normalXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalX)
-        let normalYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalY)
-        let normalZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.normalZ)
-
-        let color: Color
-        if let sh0_rPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: PropertyName.sh0_r),
-           let sh0_gPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: PropertyName.sh0_g),
-            let sh0_bPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: PropertyName.sh0_b) {
-            let sphericalHarmonicsPropertyIndices: [Int]
-            if headerElement.hasProperty(forName: "\(PropertyName.sphericalHarmonicsPrefix)0") {
-                sphericalHarmonicsPropertyIndices = try (0..<sphericalHarmonicsCount).map {
-                    try headerElement.index(forFloat32PropertyNamed: [ "\(PropertyName.sphericalHarmonicsPrefix)\($0)" ])
-                }
-                color = .sphericalHarmonic(sh0_rPropertyIndex, sh0_gPropertyIndex, sh0_bPropertyIndex, sphericalHarmonicsPropertyIndices)
-            } else {
-                color = .firstOrderSphericalHarmonic(sh0_rPropertyIndex, sh0_gPropertyIndex, sh0_bPropertyIndex)
-            }
-        } else if headerElement.hasProperty(forName: PropertyName.colorR, type: .float32) &&
-                    headerElement.hasProperty(forName: PropertyName.colorG, type: .float32) &&
-                    headerElement.hasProperty(forName: PropertyName.colorB, type: .float32) {
-            let colorRPropertyIndex = try headerElement.index(forPropertyNamed: PropertyName.colorR, type: .float32)
-            let colorGPropertyIndex = try headerElement.index(forPropertyNamed: PropertyName.colorG, type: .float32)
-            let colorBPropertyIndex = try headerElement.index(forPropertyNamed: PropertyName.colorB, type: .float32)
-            color = .linearFloat(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex)
-        } else if headerElement.hasProperty(forName: PropertyName.colorR, type: .uint8) &&
-                    headerElement.hasProperty(forName: PropertyName.colorG, type: .uint8) &&
-                    headerElement.hasProperty(forName: PropertyName.colorB, type: .uint8) {
-            let colorRPropertyIndex = try headerElement.index(forPropertyNamed: PropertyName.colorR, type: .uint8)
-            let colorGPropertyIndex = try headerElement.index(forPropertyNamed: PropertyName.colorG, type: .uint8)
-            let colorBPropertyIndex = try headerElement.index(forPropertyNamed: PropertyName.colorB, type: .uint8)
-            color = .linearUInt8(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex)
-        } else {
-            throw SplatPLYSceneReader.Error.unsupportedFileContents("No color property elements found with the expected types")
-        }
-
-
-        let scaleXPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleX)
-        let scaleYPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleY)
-        let scaleZPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.scaleZ)
-        let opacityPropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.opacity)
-
-        let rotation0PropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotation0)
-        let rotation1PropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotation1)
-        let rotation2PropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotation2)
-        let rotation3PropertyIndex = try headerElement.index(forFloat32PropertyNamed: PropertyName.rotation3)
-
-        return PointElementMapping(elementTypeIndex: elementTypeIndex,
-                                   positionXPropertyIndex: positionXPropertyIndex,
-                                   positionYPropertyIndex: positionYPropertyIndex,
-                                   positionZPropertyIndex: positionZPropertyIndex,
-                                   normalXPropertyIndex: normalXPropertyIndex,
-                                   normalYPropertyIndex: normalYPropertyIndex,
-                                   normalZPropertyIndex: normalZPropertyIndex,
-                                   colorPropertyIndices: color,
-                                   scaleXPropertyIndex: scaleXPropertyIndex,
-                                   scaleYPropertyIndex: scaleYPropertyIndex,
-                                   scaleZPropertyIndex: scaleZPropertyIndex,
-                                   opacityPropertyIndex: opacityPropertyIndex,
-                                   rotation0PropertyIndex: rotation0PropertyIndex,
-                                   rotation1PropertyIndex: rotation1PropertyIndex,
-                                   rotation2PropertyIndex: rotation2PropertyIndex,
-                                   rotation3PropertyIndex: rotation3PropertyIndex)
-    }
-
-    func apply(from element: PLYElement, to result: inout SplatScenePoint) throws {
-        result.position.x = try element.float32Value(forPropertyIndex: positionXPropertyIndex)
-        result.position.y = try element.float32Value(forPropertyIndex: positionYPropertyIndex)
-        result.position.z = try element.float32Value(forPropertyIndex: positionZPropertyIndex)
-        result.normal.x = try element.float32Value(forPropertyIndex: normalXPropertyIndex)
-        result.normal.y = try element.float32Value(forPropertyIndex: normalYPropertyIndex)
-        result.normal.z = try element.float32Value(forPropertyIndex: normalZPropertyIndex)
-
-        switch colorPropertyIndices {
-        case .sphericalHarmonic(let r, let g, let b, let sphericalHarmonicsPropertyIndices):
-            var shValues =
-                result.color.nonFirstOrderSphericalHarmonics ??
-                Array(repeating: .zero, count: sphericalHarmonicsPropertyIndices.count)
-            if shValues.count != sphericalHarmonicsPropertyIndices.count {
-                shValues = Array(repeating: .zero, count: sphericalHarmonicsPropertyIndices.count)
-            }
-            for i in 0..<sphericalHarmonicsPropertyIndices.count {
-                shValues[i] = try element.float32Value(forPropertyIndex: sphericalHarmonicsPropertyIndices[i])
-            }
-            result.color = .sphericalHarmonic(try element.float32Value(forPropertyIndex: r),
-                                              try element.float32Value(forPropertyIndex: g),
-                                              try element.float32Value(forPropertyIndex: b),
-                                              shValues)
-        case .firstOrderSphericalHarmonic(let r, let g, let b):
-            result.color = .firstOrderSphericalHarmonic(try element.float32Value(forPropertyIndex: r),
-                                                        try element.float32Value(forPropertyIndex: g),
-                                                        try element.float32Value(forPropertyIndex: b))
-        case .linearFloat(let r, let g, let b):
-            result.color = .linearFloat(try element.float32Value(forPropertyIndex: r),
-                                        try element.float32Value(forPropertyIndex: g),
-                                        try element.float32Value(forPropertyIndex: b))
-        case .linearUInt8(let r, let g, let b):
-            result.color = .linearUInt8(try element.uint8Value(forPropertyIndex: r),
-                                        try element.uint8Value(forPropertyIndex: g),
-                                        try element.uint8Value(forPropertyIndex: b))
-        }
-
-        result.scale.x = try element.float32Value(forPropertyIndex: scaleXPropertyIndex)
-        result.scale.y = try element.float32Value(forPropertyIndex: scaleYPropertyIndex)
-        result.scale.z = try element.float32Value(forPropertyIndex: scaleZPropertyIndex)
-        result.opacity = try element.float32Value(forPropertyIndex: opacityPropertyIndex)
-        result.rotation.real   = try element.float32Value(forPropertyIndex: rotation0PropertyIndex)
-        result.rotation.imag.x = try element.float32Value(forPropertyIndex: rotation1PropertyIndex)
-        result.rotation.imag.y = try element.float32Value(forPropertyIndex: rotation2PropertyIndex)
-        result.rotation.imag.z = try element.float32Value(forPropertyIndex: rotation3PropertyIndex)
     }
 }
 

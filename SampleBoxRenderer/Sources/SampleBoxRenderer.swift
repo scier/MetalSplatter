@@ -19,12 +19,14 @@ public class SampleBoxRenderer {
         case depthStencilStateCreationFailed
     }
 
-    public struct CameraDescriptor {
+    public struct ViewportDescriptor {
+        public var viewport: MTLViewport
         public var projectionMatrix: simd_float4x4
         public var viewMatrix: simd_float4x4
         public var screenSize: SIMD2<Int>
 
-        public init(projectionMatrix: simd_float4x4, viewMatrix: simd_float4x4, screenSize: SIMD2<Int>) {
+        public init(viewport: MTLViewport, projectionMatrix: simd_float4x4, viewMatrix: simd_float4x4, screenSize: SIMD2<Int>) {
+            self.viewport = viewport
             self.projectionMatrix = projectionMatrix
             self.viewMatrix = viewMatrix
             self.screenSize = screenSize
@@ -85,7 +87,6 @@ public class SampleBoxRenderer {
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
                 depthFormat: MTLPixelFormat,
-                stencilFormat: MTLPixelFormat,
                 sampleCount: Int,
                 maxViewCount: Int,
                 maxSimultaneousRenders: Int) throws {
@@ -105,7 +106,6 @@ public class SampleBoxRenderer {
             pipelineState = try Self.buildRenderPipelineWithDevice(device: device,
                                                                    colorFormat: colorFormat,
                                                                    depthFormat: depthFormat,
-                                                                   stencilFormat: stencilFormat,
                                                                    sampleCount: sampleCount,
                                                                    maxViewCount: self.maxViewCount,
                                                                    mtlVertexDescriptor: mtlVertexDescriptor)
@@ -115,7 +115,7 @@ public class SampleBoxRenderer {
         }
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
-        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
+        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.greater
         depthStateDescriptor.isDepthWriteEnabled = true
         guard let state = device.makeDepthStencilState(descriptor: depthStateDescriptor) else {
             throw Error.depthStencilStateCreationFailed
@@ -137,24 +137,76 @@ public class SampleBoxRenderer {
         }
     }
 
-    public func willRender(viewportCameras: [CameraDescriptor]) {}
-
     private func updateDynamicBufferState() {
         uniformBufferIndex = (uniformBufferIndex + 1) % maxSimultaneousRenders
         uniformBufferOffset = UniformsArray.alignedSize * uniformBufferIndex
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents() + uniformBufferOffset).bindMemory(to: UniformsArray.self, capacity: 1)
     }
 
-    private func updateUniforms(forViewportCameras viewportCameras: [CameraDescriptor]) {
-        for (i, viewportCamera) in viewportCameras.enumerated() where i <= maxViewCount {
-            uniforms.pointee.setUniforms(index: i, Uniforms(projectionMatrix: viewportCamera.projectionMatrix,
-                                                            viewMatrix: viewportCamera.viewMatrix))
+    private func updateUniforms(forViewports viewports: [ViewportDescriptor]) {
+        for (i, viewport) in viewports.enumerated() where i <= maxViewCount {
+            uniforms.pointee.setUniforms(index: i, Uniforms(projectionMatrix: viewport.projectionMatrix,
+                                                            viewMatrix: viewport.viewMatrix))
         }
     }
 
-    public func render(viewportCameras: [CameraDescriptor], to renderEncoder: MTLRenderCommandEncoder) {
+    func renderEncoder(viewports: [ViewportDescriptor],
+                       colorTexture: MTLTexture,
+                       colorStoreAction: MTLStoreAction,
+                       depthTexture: MTLTexture?,
+                       rasterizationRateMap: MTLRasterizationRateMap?,
+                       renderTargetArrayLength: Int,
+                       for commandBuffer: MTLCommandBuffer) -> MTLRenderCommandEncoder {
+        let renderPassDescriptor = MTLRenderPassDescriptor()
+        renderPassDescriptor.colorAttachments[0].texture = colorTexture
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        renderPassDescriptor.colorAttachments[0].storeAction = colorStoreAction
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
+        if let depthTexture {
+            renderPassDescriptor.depthAttachment.texture = depthTexture
+            renderPassDescriptor.depthAttachment.loadAction = .clear
+            renderPassDescriptor.depthAttachment.storeAction = .store
+            renderPassDescriptor.depthAttachment.clearDepth = 0.0
+        }
+        renderPassDescriptor.rasterizationRateMap = rasterizationRateMap
+        renderPassDescriptor.renderTargetArrayLength = renderTargetArrayLength
+
+        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+            fatalError("Failed to create render encoder")
+        }
+
+        renderEncoder.label = "Primary Render Encoder"
+
+        renderEncoder.setViewports(viewports.map(\.viewport))
+
+        if viewports.count > 1 {
+            var viewMappings = (0..<viewports.count).map {
+                MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
+                                                  renderTargetArrayIndexOffset: UInt32($0))
+            }
+            renderEncoder.setVertexAmplificationCount(viewports.count, viewMappings: &viewMappings)
+        }
+
+        return renderEncoder
+    }
+
+    public func render(viewports: [ViewportDescriptor],
+                       colorTexture: MTLTexture,
+                       colorStoreAction: MTLStoreAction,
+                       depthTexture: MTLTexture?,
+                       rasterizationRateMap: MTLRasterizationRateMap?,
+                       renderTargetArrayLength: Int,
+                       to commandBuffer: MTLCommandBuffer) throws {
         updateDynamicBufferState()
-        updateUniforms(forViewportCameras: viewportCameras)
+        updateUniforms(forViewports: viewports)
+
+        let renderEncoder = renderEncoder(viewports: viewports,
+                                          colorTexture: colorTexture,
+                                          colorStoreAction: colorStoreAction,
+                                          depthTexture: depthTexture,
+                                          rasterizationRateMap: rasterizationRateMap,
+                                          renderTargetArrayLength: renderTargetArrayLength,
+                                          for: commandBuffer)
 
         renderEncoder.pushDebugGroup("Draw Box")
 
@@ -190,6 +242,7 @@ public class SampleBoxRenderer {
         }
 
         renderEncoder.popDebugGroup()
+        renderEncoder.endEncoding()
     }
 
     private class func buildMetalVertexDescriptor() -> MTLVertexDescriptor {
@@ -217,7 +270,6 @@ public class SampleBoxRenderer {
     private class func buildRenderPipelineWithDevice(device: MTLDevice,
                                                      colorFormat: MTLPixelFormat,
                                                      depthFormat: MTLPixelFormat,
-                                                     stencilFormat: MTLPixelFormat,
                                                      sampleCount: Int,
                                                      maxViewCount: Int,
                                                      mtlVertexDescriptor: MTLVertexDescriptor)
@@ -236,7 +288,6 @@ public class SampleBoxRenderer {
 
         pipelineDescriptor.colorAttachments[0].pixelFormat = colorFormat
         pipelineDescriptor.depthAttachmentPixelFormat = depthFormat
-        pipelineDescriptor.stencilAttachmentPixelFormat = stencilFormat
 
         pipelineDescriptor.maxVertexAmplificationCount = maxViewCount
 

@@ -36,7 +36,7 @@ final class PLYIOTests: XCTestCase {
     }
 
     class ContentStorage: PLYReaderDelegate {
-        static func testApproximatelyEqual(lhs: PLYIOTests.ContentStorage, rhs: PLYIOTests.ContentStorage) {
+        static func testApproximatelyEqual(lhs: ContentStorage, rhs: ContentStorage) {
             var rhsForgedHeader = rhs.header
             rhsForgedHeader?.format = lhs.header?.format ?? .ascii
             XCTAssertEqual(lhs.header, rhsForgedHeader)
@@ -101,12 +101,51 @@ final class PLYIOTests: XCTestCase {
         try testEqual(asciiURL, binaryURL)
     }
 
+    func testRewriteASCII() throws {
+        try testReadWriteRead(asciiURL, writeFormat: .ascii)
+        try testReadWriteRead(asciiURL, writeFormat: .binaryBigEndian)
+        try testReadWriteRead(asciiURL, writeFormat: .binaryLittleEndian)
+    }
+
+    func testRewriteBinary() throws {
+        try testReadWriteRead(binaryURL, writeFormat: .ascii)
+        try testReadWriteRead(binaryURL, writeFormat: .binaryBigEndian)
+        try testReadWriteRead(binaryURL, writeFormat: .binaryLittleEndian)
+    }
+
     func testEqual(_ urlA: URL, _ urlB: URL) throws {
-        let readerA = PLYReader(urlA)
+        let readerA = try PLYReader(urlA)
         let contentA = ContentStorage()
         readerA.read(to: contentA)
 
-        let readerB = PLYReader(urlB)
+        let readerB = try PLYReader(urlB)
+        let contentB = ContentStorage()
+        readerB.read(to: contentB)
+
+        ContentStorage.testApproximatelyEqual(lhs: contentA, rhs: contentB)
+    }
+
+    func testReadWriteRead(_ url: URL, writeFormat: PLYHeader.Format) throws {
+        let readerA = try PLYReader(url)
+        let contentA = ContentStorage()
+        readerA.read(to: contentA)
+
+        let memoryOutput = DataOutputStream()
+        memoryOutput.open()
+        let writer = PLYWriter(memoryOutput)
+        guard var header = contentA.header else {
+            XCTFail("Failed to read input from \(url)")
+            return
+        }
+        header.format = writeFormat
+        let elements = Array(contentA.elements.joined())
+        try writer.write(header)
+        try writer.write(elements)
+
+        let memoryInput = InputStream(data: memoryOutput.data)
+        memoryInput.open()
+
+        let readerB = PLYReader(memoryInput)
         let contentB = ContentStorage()
         readerB.read(to: contentB)
 
@@ -114,7 +153,7 @@ final class PLYIOTests: XCTestCase {
     }
 
     func testRead(_ url: URL) throws {
-        let reader = PLYReader(url)
+        let reader = try PLYReader(url)
 
         let content = ContentCounter()
         reader.read(to: content)
@@ -159,5 +198,18 @@ extension PLYElement.Property {
         default:
             false
         }
+    }
+}
+
+private class DataOutputStream: OutputStream {
+    var data = Data()
+
+    override func open() {}
+    override func close() {}
+    override var hasSpaceAvailable: Bool { true }
+
+    override func write(_ buffer: UnsafePointer<UInt8>, maxLength length: Int) -> Int {
+        data.append(buffer, count: length)
+        return length
     }
 }

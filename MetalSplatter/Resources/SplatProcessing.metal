@@ -1,45 +1,4 @@
-#include <metal_stdlib>
-#include <simd/simd.h>
-
-using namespace metal;
-
-constant const int kMaxViewCount = 2;
-constant static const float kBoundsRadius = 2;
-constant static const float kBoundsRadiusSquared = kBoundsRadius*kBoundsRadius;
-
-enum BufferIndex: int32_t
-{
-    BufferIndexUniforms = 0,
-    BufferIndexSplat    = 1,
-    BufferIndexOrder    = 2,
-};
-
-typedef struct
-{
-    matrix_float4x4 projectionMatrix;
-    matrix_float4x4 viewMatrix;
-    uint2 screenSize;
-} Uniforms;
-
-typedef struct
-{
-    Uniforms uniforms[kMaxViewCount];
-} UniformsArray;
-
-typedef struct
-{
-    packed_float3 position;
-    packed_half4 color;
-    packed_half3 covA;
-    packed_half3 covB;
-} Splat;
-
-typedef struct
-{
-    float4 position [[position]];
-    float2 relativePosition; // Ranges from -kBoundsRadius to +kBoundsRadius
-    float4 color;
-} ColorInOut;
+#import "SplatProcessing.h"
 
 float3 calcCovariance2D(float3 viewPos,
                         packed_half3 cov3Da,
@@ -110,24 +69,15 @@ void decomposeCovariance(float3 cov2D, thread float2 &v1, thread float2 &v2) {
     // Gaussian axes are orthogonal
     float2 eigenvector2 = float2(eigenvector1.y, -eigenvector1.x);
 
-    lambda1 *= 2;
-    lambda2 *= 2;
-
     v1 = eigenvector1 * sqrt(lambda1);
     v2 = eigenvector2 * sqrt(lambda2);
 }
 
-vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
-                                    uint instanceID [[instance_id]],
-                                    ushort amp_id [[amplification_id]],
-                                    constant Splat* splatArray [[ buffer(BufferIndexSplat) ]],
-                                    constant metal::uint32_t* orderArray [[ buffer(BufferIndexOrder) ]],
-                                    constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]]) {
-    ColorInOut out;
+FragmentIn splatVertex(Splat splat,
+                       Uniforms uniforms,
+                       uint relativeVertexIndex) {
+    FragmentIn out;
 
-    Uniforms uniforms = uniformsArray.uniforms[min(int(amp_id), kMaxViewCount)];
-
-    Splat splat = splatArray[orderArray[instanceID]];
     float4 viewPosition4 = uniforms.viewMatrix * float4(splat.position, 1);
     float3 viewPosition3 = viewPosition4.xyz;
 
@@ -141,47 +91,35 @@ vertex ColorInOut splatVertexShader(uint vertexID [[vertex_id]],
     float4 projectedCenter = uniforms.projectionMatrix * viewPosition4;
 
     float bounds = 1.2 * projectedCenter.w;
-    if (projectedCenter.z < -projectedCenter.w ||
+    if (projectedCenter.z < 0.0 ||
+        projectedCenter.z > projectedCenter.w ||
         projectedCenter.x < -bounds ||
         projectedCenter.x > bounds ||
         projectedCenter.y < -bounds ||
         projectedCenter.y > bounds) {
-        out.position = float4(1, 1, 1, 0);
+        out.position = float4(1, 1, 0, 1);
         return out;
     }
 
-    float2 textureCoordinates;
-    switch (vertexID % 4) {
-        case 0: textureCoordinates = float2(0, 0); break;
-        case 1: textureCoordinates = float2(0, 1); break;
-        case 2: textureCoordinates = float2(1, 0); break;
-        case 3: textureCoordinates = float2(1, 1); break;
-    }
-    float2 vertexRelativePosition = float2((textureCoordinates.x - 0.5) * 2, (textureCoordinates.y - 0.5) * 2);
-    float2 screenCenter = projectedCenter.xy / projectedCenter.w;
-    float2 screenSizeFloat = float2(uniforms.screenSize.x, uniforms.screenSize.y);
-    float2 screenDelta =
-        (vertexRelativePosition.x * axis1 +
-         vertexRelativePosition.y * axis2)
+    const half2 relativeCoordinatesArray[] = { { -1, -1 }, { -1, 1 }, { 1, -1 }, { 1, 1 } };
+    half2 relativeCoordinates = relativeCoordinatesArray[relativeVertexIndex];
+    half2 screenSizeFloat = half2(uniforms.screenSize.x, uniforms.screenSize.y);
+    half2 projectedScreenDelta =
+        (relativeCoordinates.x * half2(axis1) + relativeCoordinates.y * half2(axis2))
         * 2
         * kBoundsRadius
         / screenSizeFloat;
-    float2 screenVertex = screenCenter + screenDelta;
 
-    out.position = float4(screenVertex.x, screenVertex.y, 0, 1);
-    out.relativePosition = kBoundsRadius * float2(textureCoordinates.x * 2 - 1, textureCoordinates.y * 2 - 1);
-    out.color = float4(splat.color);
+    out.position = float4(projectedCenter.x + projectedScreenDelta.x * projectedCenter.w,
+                          projectedCenter.y + projectedScreenDelta.y * projectedCenter.w,
+                          projectedCenter.z,
+                          projectedCenter.w);
+    out.relativePosition = kBoundsRadius * relativeCoordinates;
+    out.color = splat.color;
     return out;
 }
 
-fragment float4 splatFragmentShader(ColorInOut in [[stage_in]]) {
-    float2 v = in.relativePosition;
-    float negativeVSquared = -dot(v, v);
-    if (negativeVSquared < -kBoundsRadiusSquared) {
-        discard_fragment();
-    }
-
-    float alpha = exp(negativeVSquared) * in.color.a;
-    return float4(alpha * in.color.rgb, alpha);
+half splatFragmentAlpha(half2 relativePosition, half splatAlpha) {
+    half negativeMagnitudeSquared = -dot(relativePosition, relativePosition);
+    return (negativeMagnitudeSquared < -kBoundsRadiusSquared) ? 0 : exp(0.5 * negativeMagnitudeSquared) * splatAlpha;
 }
-

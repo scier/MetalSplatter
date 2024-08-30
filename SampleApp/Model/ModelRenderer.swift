@@ -2,8 +2,19 @@ import Foundation
 import Metal
 import simd
 
+public struct ModelRendererViewportDescriptor {
+    var viewport: MTLViewport
+    var projectionMatrix: simd_float4x4
+    var viewMatrix: simd_float4x4
+    var screenSize: SIMD2<Int>
+}
+
 public protocol ModelRenderer {
-    typealias CameraMatrices = ( projection: simd_float4x4, view: simd_float4x4, screenSize: SIMD2<Int> )
-    func willRender(viewportCameras: [CameraMatrices])
-    func render(viewportCameras: [CameraMatrices], to renderEncoder: MTLRenderCommandEncoder)
+    func render(viewports: [ModelRendererViewportDescriptor],
+                colorTexture: MTLTexture,
+                colorStoreAction: MTLStoreAction,
+                depthTexture: MTLTexture?,
+                rasterizationRateMap: MTLRasterizationRateMap?,
+                renderTargetArrayLength: Int,
+                to commandBuffer: MTLCommandBuffer) throws
 }

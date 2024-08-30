@@ -100,4 +100,13 @@ class MetalBuffer<T> {
         defer { count += elements.count }
         return count
     }
+
+    /// Assumes capacity is available
+    /// Returns the index of the value
+    @discardableResult
+    func append(_ otherBuffer: MetalBuffer<T>, fromIndex: Int) -> Int {
+        (values + count).pointee = (otherBuffer.values + fromIndex).pointee
+        defer { count += 1 }
+        return count
+    }
 }

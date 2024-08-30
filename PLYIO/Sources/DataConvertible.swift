@@ -1,6 +1,8 @@
 import Foundation
 
 public protocol DataConvertible {
+    // MARK: Reading from DataProtocol
+
     // Assumes that data.count - offset >= byteWidth
     init<D: DataProtocol>(_ data: D, from offset: D.Index, bigEndian: Bool)
     // Assumes that data.count >= byteWidth
@@ -10,10 +12,12 @@ public protocol DataConvertible {
     static func array<D: DataProtocol>(_ data: D, from offset: D.Index, count: Int, bigEndian: Bool) -> [Self]
     // Assumes that data.count >= count * byteWidth
     static func array<D: DataProtocol>(_ data: D, count: Int, bigEndian: Bool) -> [Self]
-}
 
-public protocol ZeroProviding {
-    static var zero: Self { get }
+    // MARK: Writing to MutableDataProtocol
+
+    func append<D: MutableDataProtocol>(to data: inout D, bigEndian: Bool)
+
+    static func append<D: MutableDataProtocol>(_ values: [Self], to data: inout D, bigEndian: Bool)
 }
 
 fileprivate enum DataConvertibleConstants {
@@ -22,6 +26,8 @@ fileprivate enum DataConvertibleConstants {
 
 public extension BinaryInteger
 where Self: DataConvertible, Self: EndianConvertible {
+    // MARK: Reading from DataProtocol
+
     init<D: DataProtocol>(_ data: D, from offset: D.Index, bigEndian: Bool) {
         var value: Self = .zero
         withUnsafeMutableBytes(of: &value) {
@@ -66,11 +72,37 @@ where Self: DataConvertible, Self: EndianConvertible {
             }
         }
         return values
+    }
+
+    // MARK: Writing to MutableDataProtocol
+
+    func append<D: MutableDataProtocol>(to data: inout D, bigEndian: Bool) {
+        let value = (bigEndian == DataConvertibleConstants.isBigEndian) ? self : byteSwapped
+        withUnsafeBytes(of: value) {
+            data.append(contentsOf: $0)
+        }
+    }
+
+    static func append<D: MutableDataProtocol>(_ values: [Self], to data: inout D, bigEndian: Bool) {
+        if bigEndian == DataConvertibleConstants.isBigEndian {
+            withUnsafeBytes(of: values) {
+                data.append(contentsOf: $0)
+            }
+        } else {
+            for value in values {
+                let byteSwapped = value.byteSwapped
+                withUnsafeBytes(of: byteSwapped) {
+                    data.append(contentsOf: $0)
+                }
+            }
+        }
     }
 }
 
 public extension BinaryFloatingPoint
-where Self: DataConvertible, Self: BitPatternRepresentible, Self.BitPattern: ZeroProviding, Self.BitPattern: EndianConvertible {
+where Self: DataConvertible, Self: BitPatternConvertible, Self.BitPattern: ZeroProviding, Self.BitPattern: EndianConvertible {
+    // MARK: Reading from DataProtocol
+    
     init<D: DataProtocol>(_ data: D, from offset: D.Index, bigEndian: Bool) {
         if bigEndian == DataConvertibleConstants.isBigEndian {
             self = .zero
@@ -87,7 +119,7 @@ where Self: DataConvertible, Self: BitPatternRepresentible, Self.BitPattern: Zer
             self = Self(bitPattern: value.byteSwapped)
         }
     }
-
+    
     init<D: DataProtocol>(_ data: D, bigEndian: Bool) {
         if bigEndian == DataConvertibleConstants.isBigEndian {
             self = .zero
@@ -104,7 +136,7 @@ where Self: DataConvertible, Self: BitPatternRepresentible, Self.BitPattern: Zer
             self = Self(bitPattern: value.byteSwapped)
         }
     }
-
+    
     static func array<D: DataProtocol>(_ data: D, from offset: D.Index, count: Int, bigEndian: Bool) -> [Self] {
         var values: [Self] = Array(repeating: .zero, count: count)
         values.withUnsafeMutableBytes {
@@ -118,7 +150,7 @@ where Self: DataConvertible, Self: BitPatternRepresentible, Self.BitPattern: Zer
         }
         return values
     }
-
+    
     static func array<D: DataProtocol>(_ data: D, count: Int, bigEndian: Bool) -> [Self] {
         var values: [Self] = Array(repeating: .zero, count: count)
         values.withUnsafeMutableBytes {
@@ -131,6 +163,30 @@ where Self: DataConvertible, Self: BitPatternRepresentible, Self.BitPattern: Zer
             }
         }
         return values
+    }
+    
+    // MARK: Writing to MutableDataProtocol
+    
+    func append<D: MutableDataProtocol>(to data: inout D, bigEndian: Bool) {
+        let value = (bigEndian == DataConvertibleConstants.isBigEndian) ? bitPattern : bitPattern.byteSwapped
+        withUnsafeBytes(of: value) {
+            data.append(contentsOf: $0)
+        }
+    }
+    
+    static func append<D: MutableDataProtocol>(_ values: [Self], to data: inout D, bigEndian: Bool) {
+        if bigEndian == DataConvertibleConstants.isBigEndian {
+            withUnsafeBytes(of: values) {
+                data.append(contentsOf: $0)
+            }
+        } else {
+            for value in values {
+                let byteSwapped = value.bitPattern.byteSwapped
+                withUnsafeBytes(of: byteSwapped) {
+                    data.append(contentsOf: $0)
+                }
+            }
+        }
     }
 }
 

@@ -19,7 +19,7 @@ extension LayerRenderer.Clock.Instant.Duration {
 class VisionSceneRenderer {
     private static let log =
         Logger(subsystem: Bundle.main.bundleIdentifier!,
-               category: "CompsitorServicesSceneRenderer")
+               category: "VisionSceneRenderer")
 
     let layerRenderer: LayerRenderer
     let device: MTLDevice
@@ -45,7 +45,7 @@ class VisionSceneRenderer {
         arSession = ARKitSession()
     }
 
-    func load(_ model: ModelIdentifier?) throws {
+    func load(_ model: ModelIdentifier?) async throws {
         guard model != self.model else { return }
         self.model = model
 
@@ -55,17 +55,15 @@ class VisionSceneRenderer {
             let splat = try SplatRenderer(device: device,
                                           colorFormat: layerRenderer.configuration.colorFormat,
                                           depthFormat: layerRenderer.configuration.depthFormat,
-                                          stencilFormat: .invalid,
                                           sampleCount: 1,
                                           maxViewCount: layerRenderer.properties.viewCount,
                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            try splat.readPLY(from: url)
+            try await splat.read(from: url)
             modelRenderer = splat
         case .sampleBox:
             modelRenderer = try! SampleBoxRenderer(device: device,
                                                    colorFormat: layerRenderer.configuration.colorFormat,
                                                    depthFormat: layerRenderer.configuration.depthFormat,
-                                                   stencilFormat: .invalid,
                                                    sampleCount: 1,
                                                    maxViewCount: layerRenderer.properties.viewCount,
                                                    maxSimultaneousRenders: Constants.maxSimultaneousRenders)
@@ -90,7 +88,7 @@ class VisionSceneRenderer {
         }
     }
 
-    private func viewportCameras(drawable: LayerRenderer.Drawable, deviceAnchor: DeviceAnchor?) -> [ModelRenderer.CameraMatrices] {
+    private func viewports(drawable: LayerRenderer.Drawable, deviceAnchor: DeviceAnchor?) -> [ModelRendererViewportDescriptor] {
         let rotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
                                                 axis: Constants.rotationAxis)
         let translationMatrix = matrix4x4_translation(0.0, 0.0, Constants.modelCenterZ)
@@ -111,9 +109,10 @@ class VisionSceneRenderer {
                                                          reverseZ: true)
             let screenSize = SIMD2(x: Int(view.textureMap.viewport.width),
                                    y: Int(view.textureMap.viewport.height))
-            return (projection: .init(projectionMatrix),
-                    view: userViewpointMatrix * translationMatrix * rotationMatrix * commonUpCalibration,
-                    screenSize: screenSize)
+            return ModelRendererViewportDescriptor(viewport: view.textureMap.viewport,
+                                                   projectionMatrix: .init(projectionMatrix),
+                                                   viewMatrix: userViewpointMatrix * translationMatrix * rotationMatrix * commonUpCalibration,
+                                                   screenSize: screenSize)
         }
     }
 
@@ -158,44 +157,19 @@ class VisionSceneRenderer {
 
         updateRotation()
 
-        let viewportCameras = self.viewportCameras(drawable: drawable, deviceAnchor: deviceAnchor)
-        modelRenderer?.willRender(viewportCameras: viewportCameras)
+        let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
 
-        let renderPassDescriptor = MTLRenderPassDescriptor()
-        renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
-        renderPassDescriptor.colorAttachments[0].loadAction = .clear
-        renderPassDescriptor.colorAttachments[0].storeAction = .store
-        // This is required because we render front-to-back (see SplatRenderer.Constants.renderFrontToBack).
-        // If we rendered back-to-front, alpha wouldn't need to start as zero.
-        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
-        renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
-        renderPassDescriptor.depthAttachment.loadAction = .clear
-        renderPassDescriptor.depthAttachment.storeAction = .store
-        renderPassDescriptor.depthAttachment.clearDepth = 1.0
-        renderPassDescriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
-        if layerRenderer.configuration.layout == .layered {
-            renderPassDescriptor.renderTargetArrayLength = drawable.views.count
+        do {
+            try modelRenderer?.render(viewports: viewports,
+                                      colorTexture: drawable.colorTextures[0],
+                                      colorStoreAction: .store,
+                                      depthTexture: drawable.depthTextures[0],
+                                      rasterizationRateMap: drawable.rasterizationRateMaps.first,
+                                      renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
+                                      to: commandBuffer)
+        } catch {
+            Self.log.error("Unable to render scene: \(error.localizedDescription)")
         }
-
-        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-            fatalError("Failed to create render encoder")
-        }
-
-        renderEncoder.label = "Primary Render Encoder"
-
-        renderEncoder.setViewports(drawable.views.map { $0.textureMap.viewport })
-
-        if drawable.views.count > 1 {
-            var viewMappings = (0..<drawable.views.count).map {
-                MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
-                                                  renderTargetArrayIndexOffset: UInt32($0))
-            }
-            renderEncoder.setVertexAmplificationCount(viewportCameras.count, viewMappings: &viewMappings)
-        }
-
-        modelRenderer?.render(viewportCameras: viewportCameras, to: renderEncoder)
-
-        renderEncoder.endEncoding()
 
         drawable.encodePresent(commandBuffer: commandBuffer)
 
