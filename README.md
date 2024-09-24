@@ -10,7 +10,7 @@ This is a Swift/Metal library for rendering scenes captured via the techniques d
 * SampleApp, a mini app to demonstrate how to use the above (based on Apple template code) -- don't expect much, it's intentionally minimal, just an illustration
 * SampleBoxRenderer, a drop-in replacement for MetalSplatter for debugging integration, which just renders the cube from Apple Metal template
 
-## Documentation
+## Getting Started
 
 You're right, the documentation is entirely missing; it's a major TODO list item. In the meantime, feel free to try out the sample app -- just, like I said, don't expect much.
 
@@ -21,10 +21,13 @@ You're right, the documentation is entirely missing; it's a major TODO list item
 5. Run
 6. Note: framerate will be better if you run without the debugger attached (hit Stop in Xcode, and go run from the app from the Home screen)
 
-## MetalSplatter Model Viewer
+## Showcase: apps and projects using MetalSplatter
 
-There's a simple, official [MetalSplatter model viewer app](https://apps.apple.com/us/app/metalsplatter/id6476895334) based on this library,
-available on visionOS for Vision Pro (support for iOS/macOS is coming later). It's also called MetalSplatter, go figure.
+* The [MetalSplatter viewer](https://apps.apple.com/us/app/metalsplatter/id6476895334) is a simple, official Vision Pro app based on this library. This is different from the minimal included sample app (for instance, it has camera controls and a splat gallery). Confusingly, both the (open source) library and (non-open-source) app are called MetalSplatter, and both are by [scier](https://github.com/scier).
+
+* [OverSoul](https://apps.apple.com/app/id6475262918) for Vision Pro: "Capture, share, and interact with spatial photos, 3D models and immersive spaces in a vibrant social ecosystem designed for the next generation of spatial computing"
+
+* Know of another project using MetalSplatter? Let us know!
 
 ## Resources
 
