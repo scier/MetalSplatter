@@ -42,9 +42,23 @@ public class SplatPLYSceneReader: SplatSceneReader {
     }
 }
 
+private struct Chunk {
+    let minPosition: SIMD3<Float>
+    let maxPosition: SIMD3<Float>
+    let minScale: SIMD3<Float>
+    let maxScale: SIMD3<Float>
+}
+
 private class SplatPLYSceneReaderStream {
     private weak var delegate: SplatSceneReaderDelegate? = nil
-    private var active = false
+    private var active = false {
+        didSet {
+            if !active && !chunks.isEmpty {
+                chunks.removeAll()
+            }
+        }
+    }
+    private var compressedElementMapping: CompressedElementInputMapping?
     private var elementMapping: ElementInputMapping?
     private var expectedPointCount: UInt32 = 0
     private var pointCount: UInt32 = 0
@@ -53,10 +67,13 @@ private class SplatPLYSceneReaderStream {
                                                 opacity: .linearFloat(.zero),
                                                 scale: .exponent(.zero),
                                                 rotation: .init(vector: .zero))
+    private var isCompressed = false
+    private var chunks = [Chunk]()
 
     func read(_ ply: PLYReader, to delegate: SplatSceneReaderDelegate) {
         self.delegate = delegate
         active = true
+        compressedElementMapping = nil
         elementMapping = nil
         expectedPointCount = 0
         pointCount = 0
@@ -77,9 +94,18 @@ extension SplatPLYSceneReaderStream: PLYReaderDelegate {
         }
 
         do {
-            let elementMapping = try ElementInputMapping.elementMapping(for: header)
-            self.elementMapping = elementMapping
-            expectedPointCount = header.elements[elementMapping.elementTypeIndex].count
+            isCompressed = header.index(forElementNamed: CompressedElementInputMapping.ElementName.chunk.rawValue) != nil
+            if isCompressed {
+                let elementMapping = try CompressedElementInputMapping.elementMapping(for: header)
+                compressedElementMapping = elementMapping
+                expectedPointCount = header.elements[elementMapping.vertexTypeIndex].count
+            }
+            else {
+                let elementMapping = try ElementInputMapping.elementMapping(for: header)
+                self.elementMapping = elementMapping
+                expectedPointCount = header.elements[elementMapping.elementTypeIndex].count
+            }
+
             delegate?.didStartReading(withPointCount: expectedPointCount)
         } catch {
             delegate?.didFailReading(withError: error)
@@ -90,6 +116,37 @@ extension SplatPLYSceneReaderStream: PLYReaderDelegate {
 
     func didRead(element: PLYElement, typeIndex: Int, withHeader elementHeader: PLYHeader.Element) {
         guard active else { return }
+        if isCompressed {
+            guard let compressedElementMapping else {
+                delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didRead(element:typeIndex:withHeader:) called but elementMapping is nil"))
+                active = false
+                return
+            }
+            
+            switch typeIndex {
+            case compressedElementMapping.chunkTypeIndex:
+                do {
+                    let chunk = try compressedElementMapping.chunk(from: element)
+                    chunks.append(chunk)
+                } catch {
+                    delegate?.didFailReading(withError: error)
+                    active = false
+                }
+            case compressedElementMapping.vertexTypeIndex:
+                do {
+                    try compressedElementMapping.apply(from: element, with: chunks[Int(pointCount)/256], to: &reusablePoint)
+                    pointCount += 1
+                    delegate?.didRead(points: [ reusablePoint ])
+                } catch {
+                    delegate?.didFailReading(withError: error)
+                    active = false
+                }
+            default:
+                break
+            }
+            return
+        }
+        
         guard let elementMapping else {
             delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didRead(element:typeIndex:withHeader:) called but elementMapping is nil"))
             active = false
@@ -132,6 +189,7 @@ private struct ElementInputMapping {
         case sphericalHarmonic([SIMD3<Int>])
         case linearFloat256(SIMD3<Int>)
         case linearUInt8(SIMD3<Int>)
+
     }
 
     static let sphericalHarmonicsCount = 45
@@ -257,6 +315,195 @@ private struct ElementInputMapping {
     }
 }
 
+private struct CompressedElementInputMapping {
+    enum ElementName: String {
+        case chunk = "chunk"
+        case vertex = "vertex"
+    }
+    
+    static var SH_C0: Float = 0.28209479177387814
+    
+    enum PropertyName {
+        static let positionMinX = ["min_x"]
+        static let positionMinY = ["min_y"]
+        static let positionMinZ = ["min_z"]
+        static let positionMaxX = ["max_x"]
+        static let positionMaxY = ["max_y"]
+        static let positionMaxZ = ["max_z"]
+        static let scaleMinX = ["min_scale_x"]
+        static let scaleMinY = ["min_scale_y"]
+        static let scaleMinZ = ["min_scale_z"]
+        static let scaleMaxX = ["max_scale_x"]
+        static let scaleMaxY = ["max_scale_y"]
+        static let scaleMaxZ = ["max_scale_z"]
+        
+        static let packedPosition = ["packed_position"]
+        static let packedRotation = ["packed_rotation"]
+        static let packedScale = ["packed_scale"]
+        static let packedColor = ["packed_color"]
+    }
+    
+    let chunkTypeIndex: Int
+    let vertexTypeIndex: Int
+    
+    let positionMinXPropertyIndex: Int
+    let positionMinYPropertyIndex: Int
+    let positionMinZPropertyIndex: Int
+    let positionMaxXPropertyIndex: Int
+    let positionMaxYPropertyIndex: Int
+    let positionMaxZPropertyIndex: Int
+    let scaleMinXPropertyIndex: Int
+    let scaleMinYPropertyIndex: Int
+    let scaleMinZPropertyIndex: Int
+    let scaleMaxXPropertyIndex: Int
+    let scaleMaxYPropertyIndex: Int
+    let scaleMaxZPropertyIndex: Int
+    let packedPositionPropertyIndex: Int
+    let packedRotationPropertyIndex: Int
+    let packedScalePropertyIndex: Int
+    let packedColorPropertyIndex: Int
+    
+    static func elementMapping(for header: PLYHeader) throws -> CompressedElementInputMapping {
+        guard let chunkTypeIndex = header.index(forElementNamed: ElementName.chunk.rawValue) else {
+            throw SplatPLYSceneReader.Error.unsupportedFileContents("No element type \"\(ElementName.chunk.rawValue)\" found")
+        }
+        guard let vertexTypeIndex = header.index(forElementNamed: ElementName.vertex.rawValue) else {
+            throw SplatPLYSceneReader.Error.unsupportedFileContents("No element type \"\(ElementName.vertex.rawValue)\" found")
+        }
+        
+        let chunkHeaderElement = header.elements[chunkTypeIndex]
+        let vertexHeaderElement = header.elements[vertexTypeIndex]
+        
+        let positionMinXPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.positionMinX)
+        let positionMinYPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.positionMinY)
+        let positionMinZPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.positionMinZ)
+        let positionMaxXPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.positionMaxX)
+        let positionMaxYPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.positionMaxY)
+        let positionMaxZPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.positionMaxZ)
+        
+        let scaleMinXPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.scaleMinX)
+        let scaleMinYPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.scaleMinY)
+        let scaleMinZPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.scaleMinZ)
+        let scaleMaxXPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.scaleMaxX)
+        let scaleMaxYPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.scaleMaxY)
+        let scaleMaxZPropertyIndex = try chunkHeaderElement.index(forFloat32PropertyNamed: PropertyName.scaleMaxZ)
+        
+        let packedPositionPropertyIndex = try vertexHeaderElement.index(forPropertyNamed: PropertyName.packedPosition, type: .uint32)
+        let packedRotationPropertyIndex = try vertexHeaderElement.index(forPropertyNamed: PropertyName.packedRotation, type: .uint32)
+        let packedScalePropertyIndex = try vertexHeaderElement.index(forPropertyNamed: PropertyName.packedScale, type: .uint32)
+        let packedColorPropertyIndex = try vertexHeaderElement.index(forPropertyNamed: PropertyName.packedColor, type: .uint32)
+        
+        return CompressedElementInputMapping(chunkTypeIndex: chunkTypeIndex,
+                                             vertexTypeIndex: vertexTypeIndex,
+                                             positionMinXPropertyIndex: positionMinXPropertyIndex,
+                                             positionMinYPropertyIndex: positionMinYPropertyIndex,
+                                             positionMinZPropertyIndex: positionMinZPropertyIndex,
+                                             positionMaxXPropertyIndex: positionMaxXPropertyIndex,
+                                             positionMaxYPropertyIndex: positionMaxYPropertyIndex,
+                                             positionMaxZPropertyIndex: positionMaxZPropertyIndex,
+                                             scaleMinXPropertyIndex: scaleMinXPropertyIndex,
+                                             scaleMinYPropertyIndex: scaleMinYPropertyIndex,
+                                             scaleMinZPropertyIndex: scaleMinZPropertyIndex,
+                                             scaleMaxXPropertyIndex: scaleMaxXPropertyIndex,
+                                             scaleMaxYPropertyIndex: scaleMaxYPropertyIndex,
+                                             scaleMaxZPropertyIndex: scaleMaxZPropertyIndex,
+                                             packedPositionPropertyIndex: packedPositionPropertyIndex,
+                                             packedRotationPropertyIndex: packedRotationPropertyIndex,
+                                             packedScalePropertyIndex: packedScalePropertyIndex,
+                                             packedColorPropertyIndex: packedColorPropertyIndex)
+    }
+    
+    func chunk(from element: PLYElement) throws -> Chunk {
+        let posMinX = try element.float32Value(forPropertyIndex: positionMinXPropertyIndex)
+        let posMinY = try element.float32Value(forPropertyIndex: positionMinYPropertyIndex)
+        let posMinZ = try element.float32Value(forPropertyIndex: positionMinZPropertyIndex)
+        let posMaxX = try element.float32Value(forPropertyIndex: positionMaxXPropertyIndex)
+        let posMaxY = try element.float32Value(forPropertyIndex: positionMaxYPropertyIndex)
+        let posMaxZ = try element.float32Value(forPropertyIndex: positionMaxZPropertyIndex)
+        let scaleMinX = try element.float32Value(forPropertyIndex: scaleMinXPropertyIndex)
+        let scaleMinY = try element.float32Value(forPropertyIndex: scaleMinYPropertyIndex)
+        let scaleMinZ = try element.float32Value(forPropertyIndex: scaleMinZPropertyIndex)
+        let scaleMaxX = try element.float32Value(forPropertyIndex: scaleMaxXPropertyIndex)
+        let scaleMaxY = try element.float32Value(forPropertyIndex: scaleMaxYPropertyIndex)
+        let scaleMaxZ = try element.float32Value(forPropertyIndex: scaleMinZPropertyIndex)
+        
+        return Chunk(minPosition: SIMD3<Float>(posMinX, posMinY, posMinZ),
+                     maxPosition: SIMD3<Float>(posMaxX, posMaxY, posMaxZ),
+                     minScale: SIMD3<Float>(scaleMinX, scaleMinY, scaleMinZ),
+                     maxScale: SIMD3<Float>(scaleMaxX, scaleMaxY, scaleMaxZ))
+    }
+    
+    func apply(from element: PLYElement, with chunk: Chunk, to result: inout SplatScenePoint) throws {
+        let packedPosition = try element.uint32Value(forPropertyIndex: packedPositionPropertyIndex)
+        let packedRotation = try element.uint32Value(forPropertyIndex: packedRotationPropertyIndex)
+        let packedScale = try element.uint32Value(forPropertyIndex: packedScalePropertyIndex)
+        let packedColor = try element.uint32Value(forPropertyIndex: packedColorPropertyIndex)
+    
+        let posX = unpackUnorm(packedPosition >> 21, bits: 11)
+        let posY = unpackUnorm(packedPosition >> 11, bits: 10)
+        let posZ = unpackUnorm(packedPosition, bits: 11)
+        
+        result.position.x = lerp(a: chunk.minPosition.x, b: chunk.maxPosition.x, t: posX)
+        result.position.y = lerp(a: chunk.minPosition.y, b: chunk.maxPosition.y, t: posY)
+        result.position.z = lerp(a: chunk.minPosition.z, b: chunk.maxPosition.z, t: posZ)
+        
+        let rotation = try unpackRot(packedRotation)
+        result.rotation.real = rotation.x
+        result.rotation.imag.x = rotation.y
+        result.rotation.imag.y = rotation.z
+        result.rotation.imag.z = rotation.w
+        
+        let scaleX = unpackUnorm(packedScale >> 21, bits: 11)
+        let scaleY = unpackUnorm(packedScale >> 11, bits: 10)
+        let scaleZ = unpackUnorm(packedScale, bits: 11)
+        
+        result.scale = .exponent(.init(x: lerp(a: chunk.minScale.x, b: chunk.maxScale.x, t: scaleX),
+                                       y: lerp(a: chunk.minScale.y, b: chunk.maxScale.y, t: scaleY),
+                                       z: lerp(a: chunk.minScale.z, b: chunk.maxScale.z, t: scaleZ)))
+        
+        let colorR = unpackUnorm(packedColor >> 24, bits: 8)
+        let colorG = unpackUnorm(packedColor >> 16, bits: 8)
+        let colorB = unpackUnorm(packedColor >> 8, bits: 8)
+        let opacity = unpackUnorm(packedColor, bits: 8)
+        
+        result.color = .sphericalHarmonic([.init(x: (colorR - 0.5) / CompressedElementInputMapping.SH_C0,
+                                                 y: (colorG - 0.5) / CompressedElementInputMapping.SH_C0,
+                                                 z: (colorB - 0.5) / CompressedElementInputMapping.SH_C0)])
+        
+        result.opacity = .logitFloat(-logf(1 / opacity - 1))
+    }
+    
+    private func unpackUnorm(_ value: UInt32, bits: UInt) -> Float {
+        let t: UInt32 = (1 << bits) - 1
+        return Float(value & t) / Float(t)
+    }
+    
+    private func unpackRot(_ value: UInt32) throws -> SIMD4<Float> {
+        let norm: Float = 1.0 / (sqrtf(2.0) * 0.5)
+        let a = (unpackUnorm(value >> 20, bits: 10) - 0.5) * norm
+        let b = (unpackUnorm(value >> 10, bits: 10) - 0.5) * norm
+        let c = (unpackUnorm(value, bits: 10) - 0.5) * norm
+        let m = sqrtf(1.0 - (a*a + b*b + c*c))
+        
+        switch value >> 30 {
+        case 0:
+            return SIMD4<Float>(m, a, b, c)
+        case 1:
+            return SIMD4<Float>(a, m, b, c)
+        case 2:
+            return SIMD4<Float>(a, b, m, c)
+        case 3:
+            return SIMD4<Float>(a, b, c, m)
+        default:
+            throw SplatPLYSceneReader.Error.unsupportedFileContents("Can't unpack rotation")
+        }
+    }
+    
+    private func lerp(a: Float, b: Float, t: Float) -> Float {
+        return a * (1 - t) + b * t
+    }
+}
+
 private extension PLYHeader.Element {
     func hasProperty(forName name: String, type: PLYHeader.PrimitivePropertyType? = nil) -> Bool {
         guard let index = index(forPropertyNamed: name) else {
@@ -315,6 +562,11 @@ private extension PLYElement {
 
     func uint8Value(forPropertyIndex propertyIndex: Int) throws -> UInt8 {
         guard case .uint8(let typedValue) = properties[propertyIndex] else { throw SplatPLYSceneReader.Error.internalConsistency("Unexpected type for property at index \(propertyIndex)") }
+        return typedValue
+    }
+    
+    func uint32Value(forPropertyIndex propertyIndex: Int) throws -> UInt32 {
+        guard case .uint32(let typedValue) = properties[propertyIndex] else { throw SplatPLYSceneReader.Error.internalConsistency("Unexpected type for property at index \(propertyIndex)") }
         return typedValue
     }
 }
