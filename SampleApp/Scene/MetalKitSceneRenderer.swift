@@ -22,16 +22,27 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
     let inFlightSemaphore = DispatchSemaphore(value: Constants.maxSimultaneousRenders)
 
+#if os(macOS)
+    var cameraController: CameraController?
+#endif
+
     var lastRotationUpdateTimestamp: Date? = nil
     var rotation: Angle = .zero
 
     var drawableSize: CGSize = .zero
 
-    init?(_ metalKitView: MTKView) {
+    init?(_ metalKitView: MTKView
+#if os(macOS)
+          , camera: CameraController? = nil
+#endif
+    ) {
         self.device = metalKitView.device!
         guard let queue = self.device.makeCommandQueue() else { return nil }
         self.commandQueue = queue
         self.metalKitView = metalKitView
+#if os(macOS)
+        self.cameraController = camera
+#endif
         metalKitView.colorPixelFormat = MTLPixelFormat.bgra8Unorm_srgb
         metalKitView.depthStencilPixelFormat = MTLPixelFormat.depth32Float
         metalKitView.sampleCount = 1
@@ -80,9 +91,20 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
         let viewport = MTLViewport(originX: 0, originY: 0, width: drawableSize.width, height: drawableSize.height, znear: 0, zfar: 1)
 
+        let viewMatrix: simd_float4x4
+#if os(macOS)
+        if let camera = cameraController {
+            viewMatrix = camera.viewMatrix * commonUpCalibration
+        } else {
+            viewMatrix = translationMatrix * rotationMatrix * commonUpCalibration
+        }
+#else
+        viewMatrix = translationMatrix * rotationMatrix * commonUpCalibration
+#endif
+
         return ModelRendererViewportDescriptor(viewport: viewport,
                                                projectionMatrix: projectionMatrix,
-                                               viewMatrix: translationMatrix * rotationMatrix * commonUpCalibration,
+                                               viewMatrix: viewMatrix,
                                                screenSize: SIMD2(x: Int(drawableSize.width), y: Int(drawableSize.height)))
     }
 
@@ -112,7 +134,13 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
             semaphore.signal()
         }
 
+        #if os(macOS)
+        if cameraController == nil {
+            updateRotation()
+        }
+        #else
         updateRotation()
+        #endif
 
         do {
             try modelRenderer.render(viewports: [viewport],

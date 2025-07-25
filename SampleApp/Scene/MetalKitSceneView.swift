@@ -14,6 +14,9 @@ struct MetalKitSceneView: ViewRepresentable {
 
     class Coordinator {
         var renderer: MetalKitSceneRenderer?
+#if os(macOS)
+        let camera = CameraController()
+#endif
     }
 
     func makeCoordinator() -> Coordinator {
@@ -31,13 +34,22 @@ struct MetalKitSceneView: ViewRepresentable {
 #endif
 
     private func makeView(_ coordinator: Coordinator) -> MTKView {
+#if os(macOS)
+        let metalKitView = InteractiveMTKView()
+        metalKitView.cameraController = coordinator.camera
+#else
         let metalKitView = MTKView()
+#endif
 
         if let metalDevice = MTLCreateSystemDefaultDevice() {
             metalKitView.device = metalDevice
         }
 
-        let renderer = MetalKitSceneRenderer(metalKitView)
+        let renderer = MetalKitSceneRenderer(metalKitView
+#if os(macOS)
+                                              , camera: coordinator.camera
+#endif
+        )
         coordinator.renderer = renderer
         metalKitView.delegate = renderer
 
