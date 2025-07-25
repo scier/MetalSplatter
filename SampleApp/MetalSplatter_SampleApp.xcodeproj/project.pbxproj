@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		147AFBD02E33ED730052B2AD /* CameraController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147AFBCE2E33ED730052B2AD /* CameraController.swift */; };
+		147AFBD12E33ED730052B2AD /* InteractiveMTKView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147AFBCF2E33ED730052B2AD /* InteractiveMTKView.swift */; };
 		610347D92B46864500693CE3 /* SampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF62B41551F00302B57 /* SampleApp.swift */; };
 		610347DA2B46874500693CE3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791DF72B41551F00302B57 /* ContentView.swift */; };
 		610347DB2B46875700693CE3 /* VisionSceneRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E0C2B41683500302B57 /* VisionSceneRenderer.swift */; };
@@ -27,6 +29,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		147AFBCE2E33ED730052B2AD /* CameraController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraController.swift; sourceTree = "<group>"; };
+		147AFBCF2E33ED730052B2AD /* InteractiveMTKView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveMTKView.swift; sourceTree = "<group>"; };
 		610347D82B46861E00693CE3 /* ContentStageConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentStageConfiguration.swift; sourceTree = "<group>"; };
 		61791DC32B41514300302B57 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		61791DDA2B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "SplatRenderer+ModelRenderer.swift"; sourceTree = "<group>"; };
@@ -73,6 +77,8 @@
 		610347E02B468A0000693CE3 /* Scene */ = {
 			isa = PBXGroup;
 			children = (
+				147AFBCE2E33ED730052B2AD /* CameraController.swift */,
+				147AFBCF2E33ED730052B2AD /* InteractiveMTKView.swift */,
 				610347D82B46861E00693CE3 /* ContentStageConfiguration.swift */,
 				61791DF72B41551F00302B57 /* ContentView.swift */,
 				61791E0E2B41685800302B57 /* MetalKitSceneRenderer.swift */,
@@ -213,6 +219,8 @@
 				610347D92B46864500693CE3 /* SampleApp.swift in Sources */,
 				61791E102B41688000302B57 /* MetalKitSceneRenderer.swift in Sources */,
 				61791DE02B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift in Sources */,
+				147AFBD02E33ED730052B2AD /* CameraController.swift in Sources */,
+				147AFBD12E33ED730052B2AD /* InteractiveMTKView.swift in Sources */,
 				61791DE82B4154FB00302B57 /* ModelRenderer.swift in Sources */,
 				61791DCF2B41544300302B57 /* Assets.xcassets in Sources */,
 				61791E132B416DD700302B57 /* Constants.swift in Sources */,

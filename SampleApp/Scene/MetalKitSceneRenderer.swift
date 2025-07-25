@@ -31,17 +31,15 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
     var drawableSize: CGSize = .zero
 
-    init?(_ metalKitView: MTKView
-#if os(macOS)
-          , camera: CameraController? = nil
-#endif
-    ) {
+    init?(_ metalKitView: MTKView, camera: CameraController? = nil) {
         self.device = metalKitView.device!
         guard let queue = self.device.makeCommandQueue() else { return nil }
         self.commandQueue = queue
         self.metalKitView = metalKitView
 #if os(macOS)
         self.cameraController = camera
+#else
+        _ = camera // suppress unused parameter warning on iOS
 #endif
         metalKitView.colorPixelFormat = MTLPixelFormat.bgra8Unorm_srgb
         metalKitView.depthStencilPixelFormat = MTLPixelFormat.depth32Float

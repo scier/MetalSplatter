@@ -45,11 +45,12 @@ struct MetalKitSceneView: ViewRepresentable {
             metalKitView.device = metalDevice
         }
 
-        let renderer = MetalKitSceneRenderer(metalKitView
 #if os(macOS)
-                                              , camera: coordinator.camera
+        let renderer = MetalKitSceneRenderer(metalKitView, camera: coordinator.camera)
+#else
+        let renderer = MetalKitSceneRenderer(metalKitView)
 #endif
-        )
+
         coordinator.renderer = renderer
         metalKitView.delegate = renderer
 

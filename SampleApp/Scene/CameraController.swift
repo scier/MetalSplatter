@@ -1,4 +1,5 @@
 #if os(macOS)
+import Combine
 import simd
 
 final class CameraController: ObservableObject {
