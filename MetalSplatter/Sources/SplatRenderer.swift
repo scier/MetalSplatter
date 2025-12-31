@@ -25,6 +25,11 @@ public class SplatRenderer {
         static let maxIndexedSplatCount = 1024
 
         static let tileSize = MTLSize(width: 32, height: 32, depth: 1)
+
+        // When performing the splat locality sort, we need to use quantized positions, meaning we need to compute bounds.
+        // It's fine if the bounds doesn't include all the splats, some will be clamped to the outside of the box so will
+        // just get a less efficient locality sort. Let's set the bounds to mean +/- N * std.dev., where N is:
+        static let boundsStdDeviationsForLocalitySort: Float = 2.5
     }
 
     private static let log =
@@ -47,8 +52,9 @@ public class SplatRenderer {
 
     // Keep in sync with Shaders.metal : BufferIndex
     enum BufferIndex: NSInteger {
-        case uniforms = 0
-        case splat    = 1
+        case uniforms   = 0
+        case splat      = 1
+        case splatIndex = 2
     }
 
     // Keep in sync with Shaders.metal : Uniforms
@@ -100,10 +106,7 @@ public class SplatRenderer {
         var covB: PackedHalf3
     }
 
-    struct SplatIndexAndDepth {
-        var index: UInt32
-        var depth: Float
-    }
+    public typealias SplatIndexType = UInt32
 
     public let device: MTLDevice
     public let colorFormat: MTLPixelFormat
@@ -166,23 +169,19 @@ public class SplatRenderer {
     var cameraWorldPosition: SIMD3<Float> = .zero
     var cameraWorldForward: SIMD3<Float> = .init(x: 0, y: 0, z: -1)
 
-    typealias IndexType = UInt32
-    // splatBuffer contains one entry for each gaussian splat
+    // splatBuffer contain one entry for each gaussian splat
     var splatBuffer: MetalBuffer<Splat>
-    // splatBufferPrime is a copy of splatBuffer, which is not currenly in use for rendering.
-    // We use this for sorting, and when we're done, swap it with splatBuffer.
-    // There's a good chance that we'll sometimes end up sorting a splatBuffer still in use for
-    // rendering.
-    // TODO: Replace this with a more robust multiple-buffer scheme to guarantee we're never actively sorting a buffer still in use for rendering
-    var splatBufferPrime: MetalBuffer<Splat>
+    var splatIndexBuffer: MetalBuffer<SplatIndexType>
 
-    var indexBuffer: MetalBuffer<UInt32>
+    let sorter: SplatSorter<SplatIndexType>
+
+    var triangleVertexIndexBuffer: MetalBuffer<UInt32>
 
     public var splatCount: Int { splatBuffer.count }
 
-    var sorting = false
-    var orderAndDepthTempSort: [SplatIndexAndDepth] = []
+    private var needsLocalitySort: Bool = false
 
+    @MainActor
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
                 depthFormat: MTLPixelFormat,
@@ -208,8 +207,10 @@ public class SplatRenderer {
         self.uniforms = UnsafeMutableRawPointer(dynamicUniformBuffers.contents()).bindMemory(to: UniformsArray.self, capacity: 1)
 
         self.splatBuffer = try MetalBuffer(device: device)
-        self.splatBufferPrime = try MetalBuffer(device: device)
-        self.indexBuffer = try MetalBuffer(device: device)
+        self.splatIndexBuffer = try MetalBuffer(device: device)
+        self.triangleVertexIndexBuffer = try MetalBuffer(device: device)
+
+        self.sorter = try SplatSorter(device: device)
 
         do {
             library = try device.makeDefaultLibrary(bundle: Bundle.module)
@@ -377,6 +378,7 @@ public class SplatRenderer {
         }
 
         splatBuffer.append(points.map { Splat($0) })
+        needsLocalitySort = true
     }
 
     public func add(_ point: SplatScenePoint) throws {
@@ -403,10 +405,6 @@ public class SplatRenderer {
 
         cameraWorldPosition = viewports.map { Self.cameraWorldPosition(forViewMatrix: $0.viewMatrix) }.mean ?? .zero
         cameraWorldForward = viewports.map { Self.cameraWorldForward(forViewMatrix: $0.viewMatrix) }.mean?.normalized ?? .init(x: 0, y: 0, z: -1)
-
-        if !sorting {
-            resort()
-        }
     }
 
     private static func cameraWorldForward(forViewMatrix view: simd_float4x4) -> simd_float3 {
@@ -469,6 +467,7 @@ public class SplatRenderer {
         return renderEncoder
     }
 
+    @MainActor
     public func render(viewports: [ViewportDescriptor],
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
@@ -476,8 +475,20 @@ public class SplatRenderer {
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
                        to commandBuffer: MTLCommandBuffer) throws {
-        let splatCount = splatBuffer.count
-        guard splatBuffer.count != 0 else { return }
+        if needsLocalitySort {
+            sortSplatsByLocality()
+            needsLocalitySort = false
+        }
+
+        sorter.retrieveSortIfComplete(activeBuffer: &splatIndexBuffer)
+        sorter.triggerSort(splatBuffer: splatBuffer,
+                           cameraWorldPosition: cameraWorldPosition,
+                           cameraWorldForward: cameraWorldForward,
+                           onStart: onSortStart,
+                           onComplete: onSortComplete)
+
+        let splatCount = splatIndexBuffer.count
+        guard splatCount != 0 else { return }
         let indexedSplatCount = min(splatCount, Constants.maxIndexedSplatCount)
         let instanceCount = (splatCount + indexedSplatCount - 1) / indexedSplatCount
 
@@ -500,21 +511,21 @@ public class SplatRenderer {
                                           renderTargetArrayLength: renderTargetArrayLength,
                                           for: commandBuffer)
 
-        let indexCount = indexedSplatCount * 6
-        if indexBuffer.count < indexCount {
+        let triangleVertexCount = indexedSplatCount * 6
+        if triangleVertexIndexBuffer.count < triangleVertexCount {
             do {
-                try indexBuffer.ensureCapacity(indexCount)
+                try triangleVertexIndexBuffer.ensureCapacity(triangleVertexCount)
             } catch {
                 return
             }
-            indexBuffer.count = indexCount
+            triangleVertexIndexBuffer.count = triangleVertexCount
             for i in 0..<indexedSplatCount {
-                indexBuffer.values[i * 6 + 0] = UInt32(i * 4 + 0)
-                indexBuffer.values[i * 6 + 1] = UInt32(i * 4 + 1)
-                indexBuffer.values[i * 6 + 2] = UInt32(i * 4 + 2)
-                indexBuffer.values[i * 6 + 3] = UInt32(i * 4 + 1)
-                indexBuffer.values[i * 6 + 4] = UInt32(i * 4 + 2)
-                indexBuffer.values[i * 6 + 5] = UInt32(i * 4 + 3)
+                triangleVertexIndexBuffer.values[i * 6 + 0] = UInt32(i * 4 + 0)
+                triangleVertexIndexBuffer.values[i * 6 + 1] = UInt32(i * 4 + 1)
+                triangleVertexIndexBuffer.values[i * 6 + 2] = UInt32(i * 4 + 2)
+                triangleVertexIndexBuffer.values[i * 6 + 3] = UInt32(i * 4 + 1)
+                triangleVertexIndexBuffer.values[i * 6 + 4] = UInt32(i * 4 + 2)
+                triangleVertexIndexBuffer.values[i * 6 + 5] = UInt32(i * 4 + 3)
             }
         }
 
@@ -542,11 +553,12 @@ public class SplatRenderer {
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: BufferIndex.splat.rawValue)
+        renderEncoder.setVertexBuffer(splatIndexBuffer.buffer, offset: 0, index: BufferIndex.splatIndex.rawValue)
 
         renderEncoder.drawIndexedPrimitives(type: .triangle,
-                                            indexCount: indexCount,
+                                            indexCount: triangleVertexCount,
                                             indexType: .uint32,
-                                            indexBuffer: indexBuffer.buffer,
+                                            indexBuffer: triangleVertexIndexBuffer.buffer,
                                             indexBufferOffset: 0,
                                             instanceCount: instanceCount)
 
@@ -569,57 +581,76 @@ public class SplatRenderer {
         renderEncoder.endEncoding()
     }
 
-    // Sort splatBuffer (read-only), storing the results in splatBuffer (write-only) then swap splatBuffer and splatBufferPrime
-    public func resort() {
-        guard !sorting else { return }
-        sorting = true
-        onSortStart?()
-        let sortStartTime = Date()
-
-        let splatCount = splatBuffer.count
-
-        let cameraWorldForward = cameraWorldForward
-        let cameraWorldPosition = cameraWorldPosition
-
-        Task(priority: .high) {
-            defer {
-                sorting = false
-                onSortComplete?(-sortStartTime.timeIntervalSinceNow)
-            }
-
-            if orderAndDepthTempSort.count != splatCount {
-                orderAndDepthTempSort = Array(repeating: SplatIndexAndDepth(index: .max, depth: 0), count: splatCount)
-            }
-
-            if Constants.sortByDistance {
-                for i in 0..<splatCount {
-                    orderAndDepthTempSort[i].index = UInt32(i)
-                    let splatPosition = splatBuffer.values[i].position.simd
-                    orderAndDepthTempSort[i].depth = (splatPosition - cameraWorldPosition).lengthSquared
-                }
-            } else {
-                for i in 0..<splatCount {
-                    orderAndDepthTempSort[i].index = UInt32(i)
-                    let splatPosition = splatBuffer.values[i].position.simd
-                    orderAndDepthTempSort[i].depth = dot(splatPosition, cameraWorldForward)
-                }
-            }
-
-            orderAndDepthTempSort.sort { $0.depth > $1.depth }
-
-            do {
-                try splatBufferPrime.setCapacity(splatCount)
-                splatBufferPrime.count = 0
-                for newIndex in 0..<orderAndDepthTempSort.count {
-                    let oldIndex = Int(orderAndDepthTempSort[newIndex].index)
-                    splatBufferPrime.append(splatBuffer, fromIndex: oldIndex)
-                }
-
-                swap(&splatBuffer, &splatBufferPrime)
-            } catch {
-                // TODO: report error
-            }
+    // Define a bounding box which doesn't quite include all the splats, just most of them
+    private func bounds(withinSigmaMultiple sigmaMultiple: Float) -> (min: SIMD3<Float>, max: SIMD3<Float>) {
+        var sum = SIMD3<Float>.zero
+        var sumOfSquares = SIMD3<Float>.zero
+        let count = Float(splatBuffer.count)
+        for i in 0..<splatBuffer.count {
+            let p = splatBuffer.values[i].position
+            let position = SIMD3<Float>(p.x, p.y, p.z)
+            sum += position
+            sumOfSquares += position * position
         }
+        let mean = sum / count
+        let variance = sumOfSquares / count - mean * mean
+        let sigma = SIMD3<Float>(x: sqrt(variance.x), y: sqrt(variance.y), z: sqrt(variance.z))
+
+        let minBounds = mean - sigmaMultiple * sigma
+        let maxBounds = mean + sigmaMultiple * sigma
+
+        return (min: minBounds, max: maxBounds)
+    }
+
+    /// Sorts splatBuffer by their position's Morton code, in order to improve memory locality: adjacent splats in memory will tend to be nearby in space as well.
+    /// This helps improve the tiling/cache performance of the vertex shader.
+    private func sortSplatsByLocality() {
+        guard splatBuffer.count > 3 else { return }
+
+        let (minBounds, maxBounds) = bounds(withinSigmaMultiple: Constants.boundsStdDeviationsForLocalitySort)
+        let boundsSize = maxBounds - minBounds
+        guard boundsSize.x > 0 && boundsSize.y > 0 && boundsSize.z > 0 else {
+            return
+        }
+        let invBoundsSize = 1/boundsSize
+
+        // Quantize a value into a 10-bit unsigned integers
+        func quantize(_ value: Float, _ minBounds: Float, _ invBoundsSize: Float) -> UInt32 {
+            let normalizedValue = (value - minBounds) * invBoundsSize
+            let clamped = max(min(normalizedValue, 1), 0)
+            return UInt32(clamped * 1023.0)
+        }
+        // Quantize a splat position into 10-bit unsigned integers per axis
+        func quantize(_ p: SIMD3<Float>) -> SIMD3<UInt32> {
+            SIMD3<UInt32>(quantize(p.x, minBounds.x, invBoundsSize.x),
+                          quantize(p.y, minBounds.y, invBoundsSize.y),
+                          quantize(p.z, minBounds.z, invBoundsSize.z))
+        }
+
+        // Encode quantized coordinate into a single Morton code
+        func morton3D(_ p: SIMD3<UInt32>) -> UInt32 {
+            var result: UInt32 = 0
+            for i in 0..<10 {
+                result |= ((p.x >> i) & 1) << (3 * i + 0)
+                result |= ((p.y >> i) & 1) << (3 * i + 1)
+                result |= ((p.z >> i) & 1) << (3 * i + 2)
+            }
+            return result
+        }
+
+        // Create array of (index, morton code) pairs by directly accessing splatBuffer.values
+        let indicesWithMortonCodes: [(Int, UInt32)] = (0..<splatBuffer.count).map { i in
+            let position = splatBuffer.values[i].position
+            let simdPosition = SIMD3<Float>(x: position.x, y: position.y, z: position.z)
+            let morton = morton3D(quantize(simdPosition))
+            return (i, morton)
+        }
+
+        // Sort indices by their Morton code
+        let sorted = indicesWithMortonCodes.sorted { $0.1 < $1.1 }.map(\.0)
+
+        // Reorder splatBuffer's values according to sorted indices
+        splatBuffer.values.reorderInPlace(fromSourceIndices: sorted)
     }
 }
 
@@ -662,13 +693,7 @@ extension Array where Element == SIMD3<Float> {
     }
 }
 
-private extension MTLPackedFloat3 {
-    var simd: SIMD3<Float> {
-        SIMD3(x: x, y: y, z: z)
-    }
-}
-
-private extension SIMD3 where Scalar: BinaryFloatingPoint, Scalar.RawSignificand: FixedWidthInteger {
+extension SIMD3 where Scalar: BinaryFloatingPoint, Scalar.RawSignificand: FixedWidthInteger {
     var normalized: SIMD3<Scalar> {
         self / Scalar(sqrt(lengthSquared))
     }
@@ -704,5 +729,33 @@ private extension MTLLibrary {
             fatalError("Unable to load required shader function: \"\(name)\"")
         }
         return result
+    }
+}
+
+extension UnsafeMutablePointer {
+    /// Reorder elements so that `self[i] = originalSelf[sortedIndices[i]]`.
+    mutating func reorderInPlace(fromSourceIndices sourceIndices: [Int]) {
+        let count = sourceIndices.count
+        var visited = [Bool](repeating: false, count: count)
+
+        for i in 0..<count {
+            guard !visited[i] else { continue }
+
+            var current = i
+            let temp = advanced(by: sourceIndices[current]).move()
+
+            while true {
+                visited[current] = true
+                let next = sourceIndices[current]
+
+                if visited[next] {
+                    advanced(by: current).initialize(to: temp)
+                    break
+                } else {
+                    advanced(by: current).moveAssign(from: advanced(by: next), count: 1)
+                    current = next
+                }
+            }
+        }
     }
 }

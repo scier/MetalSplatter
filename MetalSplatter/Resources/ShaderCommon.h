@@ -9,8 +9,9 @@ constant static const half kBoundsRadiusSquared = kBoundsRadius*kBoundsRadius;
 
 enum BufferIndex: int32_t
 {
-    BufferIndexUniforms = 0,
-    BufferIndexSplat    = 1,
+    BufferIndexUniforms   = 0,
+    BufferIndexSplat      = 1,
+    BufferIndexSplatIndex = 2,
 };
 
 typedef struct
@@ -40,6 +41,8 @@ typedef struct
     packed_half3 covA;
     packed_half3 covB;
 } Splat;
+
+typedef uint SplatIndex;
 
 typedef struct
 {

@@ -2,6 +2,7 @@ import Metal
 import MetalSplatter
 
 extension SplatRenderer: ModelRenderer {
+    @MainActor
     public func render(viewports: [ModelRendererViewportDescriptor],
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,

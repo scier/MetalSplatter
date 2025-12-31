@@ -10,6 +10,7 @@ public struct ModelRendererViewportDescriptor {
 }
 
 public protocol ModelRenderer {
+    @MainActor
     func render(viewports: [ModelRendererViewportDescriptor],
                 colorTexture: MTLTexture,
                 colorStoreAction: MTLStoreAction,
