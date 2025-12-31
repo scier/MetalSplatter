@@ -24,8 +24,8 @@ fileprivate enum DataConvertibleConstants {
     fileprivate static let isBigEndian = 42 == 42.bigEndian
 }
 
-public extension BinaryInteger
-where Self: DataConvertible, Self: EndianConvertible {
+public extension FixedWidthInteger
+where Self: DataConvertible {
     // MARK: Reading from DataProtocol
 
     init<D: DataProtocol>(_ data: D, from offset: D.Index, bigEndian: Bool) {
@@ -100,7 +100,7 @@ where Self: DataConvertible, Self: EndianConvertible {
 }
 
 public extension BinaryFloatingPoint
-where Self: DataConvertible, Self: BitPatternConvertible, Self.BitPattern: ZeroProviding, Self.BitPattern: EndianConvertible {
+where Self: DataConvertible, Self: BitPatternConvertible, Self.BitPattern: FixedWidthInteger {
     // MARK: Reading from DataProtocol
     
     init<D: DataProtocol>(_ data: D, from offset: D.Index, bigEndian: Bool) {
@@ -195,8 +195,8 @@ extension UInt8: DataConvertible {}
 extension Int16: DataConvertible {}
 extension UInt16: DataConvertible {}
 extension Int32: DataConvertible {}
-extension UInt32: DataConvertible, ZeroProviding {}
+extension UInt32: DataConvertible {}
 extension Int64: DataConvertible {}
-extension UInt64: DataConvertible, ZeroProviding {}
+extension UInt64: DataConvertible {}
 extension Float: DataConvertible {}
 extension Double: DataConvertible {}

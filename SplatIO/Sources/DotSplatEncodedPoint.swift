@@ -15,7 +15,7 @@ extension DotSplatEncodedPoint: ByteWidthProviding {
     }
 }
 
-extension DotSplatEncodedPoint: ZeroProviding {
+extension DotSplatEncodedPoint {
     static let zero = DotSplatEncodedPoint(position: .zero, scales: .zero, color: .zero, rot: .zero)
 }
 

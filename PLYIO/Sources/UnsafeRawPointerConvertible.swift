@@ -38,7 +38,7 @@ fileprivate enum UnsafeRawPointerConvertibleConstants {
     fileprivate static let isBigEndian = 42 == 42.bigEndian
 }
 
-public extension BinaryInteger where Self: UnsafeRawPointerConvertible, Self: EndianConvertible {
+public extension FixedWidthInteger where Self: UnsafeRawPointerConvertible {
     // MARK: Reading from UnsafeRawPointer
 
     init(_ data: UnsafeRawPointer, from offset: Int, bigEndian: Bool) {
@@ -117,7 +117,7 @@ public extension BinaryInteger where Self: UnsafeRawPointerConvertible, Self: En
     }
 }
 
-public extension BinaryFloatingPoint where Self: UnsafeRawPointerConvertible, Self: BitPatternConvertible, Self.BitPattern: EndianConvertible {
+public extension BinaryFloatingPoint where Self: UnsafeRawPointerConvertible, Self: BitPatternConvertible, Self.BitPattern: FixedWidthInteger {
     // MARK: Reading from UnsafeRawPointer
 
     init(_ data: UnsafeRawPointer, from offset: Int, bigEndian: Bool) {
