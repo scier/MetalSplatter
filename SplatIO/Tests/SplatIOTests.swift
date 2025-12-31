@@ -1,82 +1,23 @@
 import XCTest
+import PLYIO
 import Spatial
 import SplatIO
 
 final class SplatIOTests: XCTestCase {
-    class ContentCounter: SplatSceneReaderDelegate {
-        var expectedPointCount: UInt32?
-        var pointCount: UInt32 = 0
-        var didFinish = false
-        var didFail = false
-
-        func reset() {
-            expectedPointCount = nil
-            pointCount = 0
-            didFinish = false
-            didFail = false
-        }
-
-        func didStartReading(withPointCount pointCount: UInt32?) {
-            XCTAssertNil(expectedPointCount)
-            XCTAssertFalse(didFinish)
-            XCTAssertFalse(didFail)
-            expectedPointCount = pointCount
-        }
-
-        func didRead(points: [SplatIO.SplatScenePoint]) {
-            pointCount += UInt32(points.count)
-        }
-
-        func didFinishReading() {
-            XCTAssertFalse(didFinish)
-            XCTAssertFalse(didFail)
-            didFinish = true
-        }
-
-        func didFailReading(withError error: Error?) {
-            XCTAssertFalse(didFinish)
-            XCTAssertFalse(didFail)
-            didFail = true
-        }
-    }
-
-    class ContentStorage: SplatSceneReaderDelegate {
-        var points: [SplatIO.SplatScenePoint] = []
-        var didFinish = false
-        var didFail = false
-
-        func reset() {
-            points = []
-            didFinish = false
-            didFail = false
-        }
-
-        func didStartReading(withPointCount pointCount: UInt32?) {
-            XCTAssertTrue(points.isEmpty)
-            XCTAssertFalse(didFinish)
-            XCTAssertFalse(didFail)
-        }
-
-        func didRead(points: [SplatScenePoint]) {
-            self.points.append(contentsOf: points)
-        }
-
-        func didFinishReading() {
-            XCTAssertFalse(didFinish)
-            XCTAssertFalse(didFail)
-            didFinish = true
-        }
-
-        func didFailReading(withError error: Error?) {
-            XCTAssertFalse(didFinish)
-            XCTAssertFalse(didFail)
-            didFail = true
-        }
-
+    class ContentStorage {
         static func testApproximatelyEqual(lhs: ContentStorage, rhs: ContentStorage) {
             XCTAssertEqual(lhs.points.count, rhs.points.count, "Same number of points")
             for (lhsPoint, rhsPoint) in zip(lhs.points, rhs.points) {
                 XCTAssertTrue(lhsPoint ~= rhsPoint)
+            }
+        }
+
+        var points: [SplatIO.SplatScenePoint] = []
+
+        init(_ reader: any SplatSceneReader) async throws {
+            let pointReader = try await reader.read()
+            for try await points in pointReader {
+                self.points.append(contentsOf: points)
             }
         }
     }
@@ -84,77 +25,76 @@ final class SplatIOTests: XCTestCase {
     let plyURL = Bundle.module.url(forResource: "test-splat.3-points-from-train", withExtension: "ply", subdirectory: "TestData")!
     let dotSplatURL = Bundle.module.url(forResource: "test-splat.3-points-from-train", withExtension: "splat", subdirectory: "TestData")!
 
-    func testReadPLY() throws {
-        try testRead(plyURL)
+    func testReadPLY() async throws {
+        try await testRead(plyURL)
     }
 
-    func textReadDotSplat() throws {
-        try testRead(dotSplatURL)
+    func textReadDotSplat() async throws {
+        try await testRead(dotSplatURL)
     }
 
-    func testFormatsEqual() throws {
-        try testEqual(plyURL, dotSplatURL)
+    func testFormatsEqual() async throws {
+        try await testEqual(plyURL, dotSplatURL)
     }
 
-    func testRewritePLY() throws {
-        try testReadWriteRead(plyURL, writePLY: true)
-        try testReadWriteRead(plyURL, writePLY: false)
+    func testRewritePLY() async throws {
+        try await testReadWriteRead(plyURL, writePLY: true)
+        try await testReadWriteRead(plyURL, writePLY: false)
     }
 
-    func testRewriteDotSplat() throws {
-        try testReadWriteRead(dotSplatURL, writePLY: true)
-        try testReadWriteRead(dotSplatURL, writePLY: false)
+    func testRewriteDotSplat() async throws {
+        try await testReadWriteRead(dotSplatURL, writePLY: true)
+        try await testReadWriteRead(dotSplatURL, writePLY: false)
     }
 
-    func testEqual(_ urlA: URL, _ urlB: URL) throws {
+    func testEqual(_ urlA: URL, _ urlB: URL) async throws {
         let readerA = try AutodetectSceneReader(urlA)
-        let contentA = ContentStorage()
-        readerA.read(to: contentA)
+        let contentA = try await ContentStorage(readerA)
 
         let readerB = try AutodetectSceneReader(urlB)
-        let contentB = ContentStorage()
-        readerB.read(to: contentB)
+        let contentB = try await ContentStorage(readerB)
 
         ContentStorage.testApproximatelyEqual(lhs: contentA, rhs: contentB)
     }
 
-    func testReadWriteRead(_ url: URL, writePLY: Bool) throws {
+    func testReadWriteRead(_ url: URL, writePLY: Bool) async throws {
         let readerA = try AutodetectSceneReader(url)
-        let contentA = ContentStorage()
-        readerA.read(to: contentA)
+        let contentA = try await ContentStorage(readerA)
 
-        let memoryOutput = DataOutputStream()
-        memoryOutput.open()
-        let writer: any SplatSceneWriter
+        let writtenData: Data
         switch writePLY {
         case true:
-            let plyWriter = SplatPLYSceneWriter(memoryOutput)
-            try plyWriter.start(pointCount: contentA.points.count)
-            writer = plyWriter
+            let plyWriter = try SplatPLYSceneWriter(to: .memory)
+            try await plyWriter.start(pointCount: contentA.points.count)
+            try await plyWriter.write(contentA.points)
+            try await plyWriter.close()
+            guard let data = await plyWriter.writtenData else {
+                XCTFail("Failed to get written data from memory writer")
+                return
+            }
+            writtenData = data
         case false:
-            writer = DotSplatSceneWriter(memoryOutput)
+            let splatWriter = try DotSplatSceneWriter(to: .memory)
+            try await splatWriter.write(contentA.points)
+            try await splatWriter.close()
+            guard let data = await splatWriter.writtenData else {
+                XCTFail("Failed to get written data from memory writer")
+                return
+            }
+            writtenData = data
         }
-        try writer.write(contentA.points)
 
-        let memoryInput = InputStream(data: memoryOutput.data)
-        memoryInput.open()
-
-        let readerB: any SplatSceneReader = writePLY ? SplatPLYSceneReader(memoryInput) : DotSplatSceneReader(memoryInput)
-        let contentB = ContentStorage()
-        readerB.read(to: contentB)
+        let readerB: any SplatSceneReader = writePLY ? try SplatPLYSceneReader(writtenData) : try DotSplatSceneReader(writtenData)
+        let contentB = try await ContentStorage(readerB)
 
         ContentStorage.testApproximatelyEqual(lhs: contentA, rhs: contentB)
     }
 
-    func testRead(_ url: URL) throws {
+    func testRead(_ url: URL) async throws {
         let reader = try AutodetectSceneReader(url)
 
-        let content = ContentCounter()
-        reader.read(to: content)
-        XCTAssertTrue(content.didFinish)
-        XCTAssertFalse(content.didFail)
-        if let expectedPointCount = content.expectedPointCount {
-            XCTAssertEqual(expectedPointCount, content.pointCount)
+        let points = try await reader.read()
+        for try await point in points {
         }
     }
 }
@@ -204,19 +144,6 @@ extension SIMD3 where Scalar: Comparable & SignedNumeric {
 extension SIMD4 where Scalar: Comparable & SignedNumeric {
     public func isWithin(tolerance: Scalar) -> Bool {
         abs(x) <= tolerance && abs(y) <= tolerance && abs(z) <= tolerance && abs(w) <= tolerance
-    }
-}
-
-private class DataOutputStream: OutputStream {
-    var data = Data()
-
-    override func open() {}
-    override func close() {}
-    override var hasSpaceAvailable: Bool { true }
-
-    override func write(_ buffer: UnsafePointer<UInt8>, maxLength length: Int) -> Int {
-        data.append(buffer, count: length)
-        return length
     }
 }
 

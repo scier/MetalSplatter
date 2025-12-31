@@ -1,8 +1,8 @@
 import Foundation
 import simd
 
-public struct SplatScenePoint {
-    public enum Color {
+public struct SplatScenePoint: Sendable {
+    public enum Color: Sendable {
         static let SH_C0: Float = 0.28209479177387814
         static let INV_SH_C0: Float = 1.0 / SH_C0
 
@@ -75,7 +75,7 @@ public struct SplatScenePoint {
         }
     }
 
-    public enum Opacity {
+    public enum Opacity: Sendable {
         case logitFloat(Float)
         case linearFloat(Float)
         case linearUInt8(UInt8)
@@ -123,7 +123,7 @@ public struct SplatScenePoint {
         }
     }
 
-    public enum Scale {
+    public enum Scale: Sendable {
         case exponent(SIMD3<Float>)
         case linearFloat(SIMD3<Float>)
 

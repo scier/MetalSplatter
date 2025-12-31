@@ -5,7 +5,7 @@ import simd
 /// A writer for Gaussian Splat files in the ".splat" format, created by https://github.com/antimatter15/splat/
 public class DotSplatSceneWriter: SplatSceneWriter {
     enum Constants {
-        static let bufferSize = 64*1024
+        static let bufferSize = 64 * 1024
     }
 
     enum Error: Swift.Error {
@@ -14,33 +14,38 @@ public class DotSplatSceneWriter: SplatSceneWriter {
         case cannotWriteAfterClose
     }
 
-    private let outputStream: OutputStream
+    private let outputStream: AsyncBufferingOutputStream
     private var buffer: UnsafeMutableRawPointer?
+    private var closed = false
 
-    public init(_ outputStream: OutputStream) {
-        self.outputStream = outputStream
-        outputStream.open()
+    public init(to destination: WriterDestination) throws {
+        self.outputStream = try AsyncBufferingOutputStream(to: destination, bufferSize: Constants.bufferSize)
         buffer = UnsafeMutableRawPointer.allocate(byteCount: Constants.bufferSize, alignment: 8)
     }
 
-    public convenience init(toFileAtPath path: String, append: Bool) throws {
-        guard let outputStream = OutputStream(toFileAtPath: path, append: append) else {
-            throw Error.cannotWriteToFile(path)
-        }
-        self.init(outputStream)
+    public convenience init(toFileAtPath path: String) throws {
+        try self.init(to: .file(URL(fileURLWithPath: path)))
     }
 
     deinit {
-        try? close()
+        buffer?.deallocate()
     }
 
-    public func close() throws {
-        outputStream.close()
+    public func close() async throws {
+        guard !closed else { return }
+        closed = true
         buffer?.deallocate()
         buffer = nil
+        try await outputStream.close()
     }
 
-    public func write(_ points: [SplatScenePoint]) throws {
+    public var writtenData: Data? {
+        get async {
+            await outputStream.writtenData
+        }
+    }
+
+    public func write(_ points: [SplatScenePoint]) async throws {
         guard let buffer else {
             throw Error.cannotWriteAfterClose
         }
@@ -53,13 +58,7 @@ public class DotSplatSceneWriter: SplatSceneWriter {
                 bytesStored += DotSplatEncodedPoint(points[i]).store(to: buffer, at: bytesStored, bigEndian: false)
             }
 
-            if outputStream.write(buffer, maxLength: bytesStored) == -1 {
-                if let error = outputStream.streamError {
-                    throw error
-                } else {
-                    throw Error.unknownOutputStreamError
-                }
-            }
+            try await outputStream.writeRaw(buffer, length: bytesStored)
 
             offset += count
         }

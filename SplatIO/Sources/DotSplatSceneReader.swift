@@ -4,66 +4,70 @@ import simd
 
 /// A reader for Gaussian Splat files in the ".splat" format, created by https://github.com/antimatter15/splat/
 public class DotSplatSceneReader: SplatSceneReader {
-    enum Error: Swift.Error {
+    enum Constants {
+        static let bodyBufferLen = 16*1024
+    }
+
+    public enum Error: Swift.Error {
         case cannotOpenSource(URL)
         case readError
         case unexpectedEndOfFile
     }
 
-    let inputStream: InputStream
+    private let source: ReaderSource
 
-    public init(_ inputStream: InputStream) {
-        self.inputStream = inputStream
-    }
-
-    public convenience init(_ url: URL) throws {
-        guard let inputStream = InputStream(url: url) else {
+    public init(_ url: URL) throws {
+        guard url.isFileURL else {
             throw Error.cannotOpenSource(url)
         }
-        self.init(inputStream)
+        self.source = .url(url)
     }
 
-    public func read(to delegate: any SplatSceneReaderDelegate) {
-        let bufferSize = 64*1024
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-        defer { buffer.deallocate() }
+    public init(_ data: Data) throws {
+        self.source = .memory(data)
+    }
 
-        inputStream.open()
-        defer { inputStream.close() }
+    public func read() throws -> AsyncThrowingStream<[SplatScenePoint], Swift.Error> {
+        let byteStream = AsyncBufferingInputStream(try source.inputStream(),
+                                                   bufferSize: Constants.bodyBufferLen)
 
-        var bytesInBuffer = 0
-        while true {
-            let readResult = inputStream.read(buffer + bytesInBuffer, maxLength: bufferSize - bytesInBuffer)
-            switch readResult {
-            case -1:
-                delegate.didFailReading(withError: Error.readError)
-                return
-            case 0:
-                guard bytesInBuffer == 0 else {
-                    delegate.didFailReading(withError: Error.unexpectedEndOfFile)
-                    return
+        return AsyncThrowingStream { continuation in
+            Task {
+                var buffer = Data()
+                var startIndex = buffer.startIndex
+                do {
+                    for try await chunk in byteStream {
+                        buffer.append(chunk)
+
+                        let fullPointsCount = buffer.count / DotSplatEncodedPoint.byteWidth
+                        guard fullPointsCount > 0 else { continue }
+
+                        let pointsCountBytes = fullPointsCount * DotSplatEncodedPoint.byteWidth
+                        var splatPoints = [SplatScenePoint]()
+                        splatPoints.reserveCapacity(fullPointsCount)
+
+                        for i in 0..<fullPointsCount {
+                            let encodedPoint = DotSplatEncodedPoint(buffer,
+                                                                    from: startIndex + i * DotSplatEncodedPoint.byteWidth,
+                                                                    bigEndian: false)
+                            splatPoints.append(encodedPoint.splatScenePoint)
+                        }
+
+                        continuation.yield(splatPoints)
+
+                        buffer.removeFirst(pointsCountBytes)
+                        startIndex = buffer.startIndex
+                    }
+
+                    if !buffer.isEmpty {
+                        continuation.finish(throwing: Error.unexpectedEndOfFile)
+                    } else {
+                        continuation.finish()
+                    }
+                } catch {
+                    continuation.finish(throwing: Error.readError)
                 }
-                delegate.didFinishReading()
-                return
-            default:
-                bytesInBuffer += readResult
             }
-
-            let encodedPointCount = bytesInBuffer / DotSplatEncodedPoint.byteWidth
-            guard encodedPointCount > 0 else { continue }
-
-            let bufferPointer = UnsafeBufferPointer(start: buffer, count: bytesInBuffer)
-            let splatPoints = (0..<encodedPointCount).map {
-                DotSplatEncodedPoint(bufferPointer, from: $0 * DotSplatEncodedPoint.byteWidth, bigEndian: false)
-                    .splatScenePoint
-            }
-            delegate.didRead(points: splatPoints)
-
-            let usedBytesInBuffer = encodedPointCount * DotSplatEncodedPoint.byteWidth
-            if usedBytesInBuffer < bytesInBuffer {
-                memmove(buffer, buffer+usedBytesInBuffer, bytesInBuffer - usedBytesInBuffer)
-            }
-            bytesInBuffer -= usedBytesInBuffer
         }
     }
 }

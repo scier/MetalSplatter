@@ -1,25 +1,54 @@
 import Foundation
 
-public protocol PLYReaderDelegate {
-    func didStartReading(withHeader header: PLYHeader)
-    func didRead(element: PLYElement, typeIndex: Int, withHeader elementHeader: PLYHeader.Element)
-    func didFinishReading()
-    func didFailReading(withError error: Swift.Error?)
+struct AsyncLineIterator: AsyncIteratorProtocol {
+    let iterator: AsyncBufferingInputStream.Iterator
+    private var buffer = Data()
+
+    init(_ iterator: AsyncBufferingInputStream.Iterator) {
+        self.iterator = iterator
+    }
+
+    mutating func next() async throws -> String? {
+        while true {
+            guard let bodyData = try await iterator.next() else {
+                // EOF: yield any remaining buffer as last line
+                if !buffer.isEmpty {
+                    defer { buffer.removeAll() }
+                    return String(data: buffer, encoding: .utf8)
+                }
+                return nil
+            }
+
+            for (index, byte) in bodyData.enumerated() {
+                if byte == UInt8(ascii: "\n") {
+                    defer { buffer.removeAll() }
+                    await iterator.pushback(bodyData.advanced(by: index + 1))
+                    return String(data: buffer, encoding: .utf8)
+                } else {
+                    buffer.append(byte)
+                }
+            }
+        }
+    }
 }
 
 public class PLYReader {
+    public struct ElementSeries: Sendable {
+        public var elements: [PLYElement]
+        public var typeIndex: Int
+        public var elementHeader: PLYHeader.Element
+    }
+
     public enum Error: LocalizedError {
-        case cannotOpenSource(URL)
         case readError
         case headerStartMissing
         case headerEndMissing
         case unexpectedEndOfFile
+        case unexpectedContentAtEndOfBody
         case internalConsistency
 
         public var errorDescription: String? {
             switch self {
-            case .cannotOpenSource(let url):
-                "Cannot open source file at \(url)"
             case .readError:
                 "Error while reading input"
             case .headerStartMissing:
@@ -28,6 +57,8 @@ public class PLYReader {
                 "Header end missing"
             case .unexpectedEndOfFile:
                 "Unexpected end-of-file while reading input"
+            case .unexpectedContentAtEndOfBody:
+                "Unexpected content past end of expected body"
             case .internalConsistency:
                 "Internal error in PLYReader"
             }
@@ -37,241 +68,297 @@ public class PLYReader {
     enum Constants {
         static let headerStartToken = "\(PLYHeader.Keyword.ply.rawValue)\n".data(using: .utf8)!
         static let headerEndToken = "\(PLYHeader.Keyword.endHeader.rawValue)\n".data(using: .utf8)!
-        // Hold up to 16k of data at once before reclaiming. Higher numbers will use more data, but lower numbers will result in more frequent, somewhat expensive "move bytes" operations.
-        static let bodySizeForReclaim = 16*1024
-
-        static let cr = UInt8(ascii: "\r")
-        static let lf = UInt8(ascii: "\n")
-        static let space = UInt8(ascii: " ")
+        static let headerMaxLen = 256*1024 // A header longer than 256kB is... unlikely
+        static let bodyBufferLen = 16*1024
+        static let asciiBufferElementCount = 1024
     }
 
-    private enum Phase {
-        case unstarted
-        case header
-        case body
-    }
+    private let source: ReaderSource
 
-    private var inputStream: InputStream
-    private var header: PLYHeader? = nil
-    private var body = Data()
-    private var bodyOffset: Int = 0
-    private var currentElementGroup: Int = 0
-    private var currentElementCountInGroup: Int = 0
-    private var reusableElement = PLYElement(properties: [])
-
-    public init(_ inputStream: InputStream) {
-        self.inputStream = inputStream
+    public init(_ source: ReaderSource) {
+        self.source = source
     }
 
     public convenience init(_ url: URL) throws {
-        guard let inputStream = InputStream(url: url) else {
-            throw Error.cannotOpenSource(url)
+        guard url.isFileURL else {
+            throw ReaderSource.Error.cannotOpen(url: url)
         }
-        self.init(inputStream)
+        self.init(ReaderSource.url(url))
     }
 
-    public func read(to delegate: PLYReaderDelegate) {
-        header = nil
-        body = Data()
-        bodyOffset = 0
-        currentElementGroup = 0
-        currentElementCountInGroup = 0
+    public convenience init(_ data: Data) throws {
+        self.init(ReaderSource.memory(data))
+    }
 
-        let bufferSize = 8*1024
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-        defer { buffer.deallocate() }
-        var headerData = Data()
+    public func read() async throws -> (header: PLYHeader, elements: AsyncThrowingStream<ElementSeries, Swift.Error>) {
+        let byteStream = AsyncBufferingInputStream(try source.inputStream(),
+                                                   bufferSize: Constants.bodyBufferLen)
+        let iterator = byteStream.makeAsyncIterator()
 
-        inputStream.open()
-        defer { inputStream.close() }
-
-        var phase: Phase = .unstarted
-
-        while true {
-            let readResult = inputStream.read(buffer, maxLength: bufferSize)
-            let bytesRead: Int
-            switch readResult {
-            case -1:
-                delegate.didFailReading(withError: Error.readError)
-                return
-            case 0:
-                switch phase {
-                case .unstarted, .header:
-                    break
-                case .body:
-                    // Reprocess the remaining data, now with isEOF = true, since that might mean a successful completion (e.g. ASCII data missing a final EOL)
-                    do {
-                        try processBody(delegate: delegate, isEOF: true)
-                    } catch {
-                        delegate.didFailReading(withError: error)
-                        return
-                    }
-                    if isComplete {
-                        delegate.didFinishReading()
-                        return
-                    }
-                }
-                delegate.didFailReading(withError: Error.unexpectedEndOfFile)
-                return
-            default:
-                bytesRead = readResult
-            }
-
-            var bufferIndex = 0
-            while bufferIndex < bytesRead {
-                switch phase {
-                case .unstarted:
-                    headerData.append(buffer[bufferIndex])
-                    bufferIndex += 1
-                    if headerData.count == Constants.headerStartToken.count {
-                        if headerData == Constants.headerStartToken {
-                            // Found header start token. Continue to read actual header
-                            phase = .header
-                        } else {
-                            // Beginning of stream didn't match headerStartToken; fail
-                            delegate.didFailReading(withError: Error.headerStartMissing)
-                            return
-                        }
-                    }
-                case .header:
-                    headerData.append(buffer[bufferIndex])
-                    bufferIndex += 1
-                    if headerData.hasSuffix(Constants.headerEndToken) {
-                        do {
-                            let header = try PLYHeader.decodeASCII(from: headerData)
-                            self.header = header
-                            phase = .body
-                            delegate.didStartReading(withHeader: header)
-                        } catch {
-                            delegate.didFailReading(withError: error)
-                            return
-                        }
-                    }
-                case .body:
-                    if bufferIndex == 0 {
-                        body.append(buffer, count: bytesRead)
-                    } else if bufferIndex < bytesRead {
-                        body.append(Data(bytes: buffer, count: bytesRead)[bufferIndex..<bytesRead])
-                    }
-                    bufferIndex = bytesRead
-                    do {
-                        try processBody(delegate: delegate, isEOF: false)
-                    } catch {
-                        delegate.didFailReading(withError: error)
-                        return
-                    }
-                    if isComplete {
-                        delegate.didFinishReading()
-                        return
-                    }
-                    reclaimBodyIfNeeded()
-                }
-            }
+        let preHeaderData = try await readData(from: iterator, until: Constants.headerStartToken, maxLength: 0)
+        guard preHeaderData != nil else {
+            throw Error.headerStartMissing
         }
-    }
-
-    private var isComplete: Bool {
-        guard let header else { return false }
-        return currentElementGroup == header.elements.count
-    }
-
-    // Maybe remove already-processed bytes from body, to reclaim memory
-    private func reclaimBodyIfNeeded() {
-        // Removing bytes is an O(N) operation, where N = number of remaining bytes. Fortunately we only reset
-        // when we've already consumed as many bytes as we can, so there are < 1 element's worth of bytes remaining
-        guard bodyOffset > 0 && body.count >= Constants.bodySizeForReclaim else { return }
-        body.removeSubrange(0..<bodyOffset)
-        bodyOffset = body.startIndex
-    }
-
-    private func processBody(delegate: PLYReaderDelegate,
-                             isEOF: Bool) throws {
-        guard let header else {
-            throw Error.internalConsistency
+        let headerData = try await readData(from: iterator, until: Constants.headerEndToken, maxLength: Constants.headerMaxLen)
+        guard let headerData else {
+            throw Error.headerEndMissing
         }
+        let header = try PLYHeader.decodeASCII(from: headerData)
 
+        let elements: AsyncThrowingStream<ElementSeries, Swift.Error> =
         switch header.format {
         case .ascii:
-            try body[bodyOffset...].withUnsafeMutableBytes { (bodyUnsafeRawBufferPointer: UnsafeMutableRawBufferPointer) in
-                let bodyUnsafeBytePointer = bodyUnsafeRawBufferPointer.bindMemory(to: UInt8.self).baseAddress!
-                var bodyUnsafeBytePointerOffset = 0
-                let bodyUnsafeBytePointerCount = bodyUnsafeRawBufferPointer.count
-                while !isComplete {
-                    let elementHeader = header.elements[self.currentElementGroup]
+            processASCIIBody(header: header, iterator: iterator)
+        case .binaryBigEndian:
+            processBinaryBody(header: header, iterator: iterator, bigEndian: true)
+        case .binaryLittleEndian:
+            processBinaryBody(header: header, iterator: iterator, bigEndian: false)
+        }
 
-                    let lineStart = bodyUnsafeBytePointerOffset
-                    var firstNewlineIndex = lineStart
-                    var newlineFound = false
-                    while !newlineFound && firstNewlineIndex < bodyUnsafeBytePointerCount {
-                        let byte = (bodyUnsafeBytePointer + firstNewlineIndex).pointee
-                        newlineFound = byte == Constants.cr || byte == Constants.lf
-                        if !newlineFound {
-                            firstNewlineIndex += 1
+        return (header: header, elements: elements)
+    }
+
+    /// Reads bytes until the endToken is found, and returns the resulting Data (which does not include the bytes in endToken).
+    /// The resulting Data will contain up to maxLength bytes; if maxLength + endToken.count bytes have been read and
+    /// endToken has not been found, or no more bytes are available, returns nil.
+    private func readData(from iterator: AsyncBufferingInputStream.Iterator, until endToken: Data, consumeToken: Bool = true, maxLength: Int) async throws -> Data? {
+        var buffer = Data()
+        let tokenLen = endToken.count
+        let maxAllowed = maxLength + tokenLen
+        while let bytes = try await iterator.next() {
+            for (index, byte) in bytes.enumerated() {
+                buffer.append(byte)
+                // Check if the buffer ends with the endToken
+                if buffer.count >= tokenLen && buffer.suffix(tokenLen) == endToken {
+                    // Push back the unused data
+                    let startPushbackIndex = consumeToken ? (index+1) : (index+1 - tokenLen)
+                    await iterator.pushback(bytes.advanced(by: startPushbackIndex))
+                    // Return data minus the token
+                    return buffer.dropLast(tokenLen)
+                }
+                // If we exceed the allowed length, abort
+                if buffer.count >= maxAllowed {
+                    return nil
+                }
+            }
+        }
+
+        // We hit EOF without finding the token
+        return nil
+    }
+
+    private func processASCIIBody(header: PLYHeader, iterator: AsyncBufferingInputStream.Iterator) -> AsyncThrowingStream<ElementSeries, Swift.Error> {
+        return AsyncThrowingStream { continuation in
+            Task {
+                guard header.elements.count > 0 else {
+                    continuation.finish()
+                    return
+                }
+
+                var currentElementGroup = 0
+                var currentElementCountInGroup = 0
+
+                var bufferedElements: [PLYElement] = Array(repeating: PLYElement(properties: []),
+                                                           count: Constants.asciiBufferElementCount)
+                var bufferedElementCount = 0
+
+                var lines = AsyncLineIterator(iterator)
+                do {
+                    while let line = try await lines.next() {
+                        guard currentElementGroup < header.elements.count else {
+                            if line.isEmpty {
+                                continue
+                            }
+                            continuation.finish(throwing: Error.unexpectedContentAtEndOfBody)
+                            return
+                        }
+
+                        let elementHeader = header.elements[currentElementGroup]
+
+                        try bufferedElements[bufferedElementCount].decodeASCII(type: elementHeader,
+                                                                               fromBody: line,
+                                                                               elementIndex: currentElementGroup)
+                        bufferedElementCount += 1
+
+                        if bufferedElementCount == bufferedElements.count {
+                            let elementSeries = ElementSeries(elements: bufferedElements,
+                                                              typeIndex: currentElementGroup,
+                                                              elementHeader: elementHeader)
+                            continuation.yield(elementSeries)
+                            bufferedElementCount = 0
+                        }
+
+                        currentElementCountInGroup += 1
+                        while currentElementGroup < header.elements.count
+                                && currentElementCountInGroup == header.elements[currentElementGroup].count {
+                            if bufferedElementCount != 0 {
+                                let elementSeries = ElementSeries(elements: Array(bufferedElements[0..<bufferedElementCount]),
+                                                                  typeIndex: currentElementGroup,
+                                                                  elementHeader: elementHeader)
+                                continuation.yield(elementSeries)
+                                bufferedElementCount = 0
+                            }
+
+                            currentElementGroup += 1
+                            currentElementCountInGroup = 0
                         }
                     }
 
-                    let lineLength = firstNewlineIndex - lineStart
-                    if firstNewlineIndex < bodyUnsafeBytePointerCount {
-                        bodyUnsafeBytePointerOffset = firstNewlineIndex + 1
-                    } else if isEOF {
-                        bodyUnsafeBytePointerOffset = bodyUnsafeBytePointerCount
-                    } else {
-                        return
-                    }
-
-                    bodyOffset += (bodyUnsafeBytePointerOffset - lineStart)
-
-                    if lineLength == 0 {
-                        continue
-                    }
-
-                    try reusableElement.decodeASCII(type: elementHeader,
-                                                    fromMutable: bodyUnsafeBytePointer,
-                                                    at: lineStart,
-                                                    bodySize: lineLength,
-                                                    elementIndex: currentElementGroup)
-
-                    delegate.didRead(element: reusableElement, typeIndex: self.currentElementGroup, withHeader: elementHeader)
-                    currentElementCountInGroup += 1
-                    while !isComplete && currentElementCountInGroup == header.elements[currentElementGroup].count {
-                        currentElementGroup += 1
-                        currentElementCountInGroup = 0
-                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
                 }
             }
-        case .binaryBigEndian, .binaryLittleEndian:
-            try body[bodyOffset...].withUnsafeBytes { (bodyUnsafeRawBufferPointer: UnsafeRawBufferPointer) in
-                let bodyUnsafeRawPointer = bodyUnsafeRawBufferPointer.baseAddress!
-                var bodyUnsafeRawPointerOffset = 0
-                while !isComplete {
-                    let elementHeader = header.elements[self.currentElementGroup]
+        }
+    }
 
-                    guard let bytesConsumed = try reusableElement.tryDecodeBinary(type: elementHeader,
-                                                                                  from: bodyUnsafeRawPointer,
-                                                                                  at: bodyUnsafeRawPointerOffset,
-                                                                                  bodySize: bodyUnsafeRawBufferPointer.count - bodyUnsafeRawPointerOffset,
-                                                                                  bigEndian: header.format == .binaryBigEndian) else {
-                        // Insufficient data available
-                        return
+    private func processBinaryBody(header: PLYHeader, iterator: AsyncBufferingInputStream.Iterator, bigEndian: Bool) -> AsyncThrowingStream<ElementSeries, Swift.Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                guard header.elements.count > 0 else {
+                    continuation.finish()
+                    return
+                }
+
+                var currentElementGroup = 0
+                var currentElementCountInGroup = 0
+                var currentElementHeader = header.elements[currentElementGroup]
+
+                var bufferOffset: Int = 0
+                var bufferSize: Int = 0
+                var targetBufferSize = Constants.bodyBufferLen
+                var bufferCapacity = Constants.bodyBufferLen
+                var buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferCapacity)
+                defer { buffer.deallocate() }
+
+                var elementsInBuffer: [PLYElement] = []
+
+                do {
+                    func processBuffer() throws {
+                        var elementCountInBuffer = 0
+                        while bufferOffset < bufferSize {
+                            guard currentElementGroup < header.elements.count else {
+                                throw Error.unexpectedContentAtEndOfBody
+                            }
+
+                            if elementsInBuffer.count == elementCountInBuffer {
+                                elementsInBuffer.append(PLYElement(properties: []))
+                            }
+
+                            guard let bytesConsumed =
+                                    try elementsInBuffer[elementCountInBuffer].tryDecodeBinary(type: currentElementHeader,
+                                                                                               from: buffer,
+                                                                                               at: bufferOffset,
+                                                                                               bodySize: bufferSize - bufferOffset,
+                                                                                               bigEndian: bigEndian)
+                            else {
+                                // Insufficient data available for a single new element
+                                let elementSeries = ElementSeries(elements: Array(elementsInBuffer.prefix(elementCountInBuffer)),
+                                                                  typeIndex: currentElementGroup,
+                                                                  elementHeader: currentElementHeader)
+                                continuation.yield(elementSeries)
+                                return
+                            }
+                            assert(bytesConsumed != 0, "PLYElement.tryDecodeBinary consumed at least one byte in producing the PLYElement")
+                            bufferOffset += bytesConsumed
+                            elementCountInBuffer += 1
+
+                            currentElementCountInGroup += 1
+                            while currentElementGroup < header.elements.count
+                                    && ((currentElementCountInGroup == header.elements[currentElementGroup].count)
+                                        || (elementCountInBuffer != 0 && bufferOffset == bufferSize)) {
+                                // Dump the current buffer because either we've finished the current group, *or* we're at the end of the buffer
+                                if elementCountInBuffer != 0 {
+                                    let elementSeries = ElementSeries(elements: Array(elementsInBuffer.prefix(elementCountInBuffer)),
+                                                                      typeIndex: currentElementGroup,
+                                                                      elementHeader: currentElementHeader)
+                                    continuation.yield(elementSeries)
+                                    elementCountInBuffer = 0
+                                }
+
+                                if currentElementCountInGroup == header.elements[currentElementGroup].count {
+                                    currentElementGroup += 1
+                                    currentElementCountInGroup = 0
+                                    if currentElementGroup < header.elements.count {
+                                        currentElementHeader = header.elements[currentElementGroup]
+                                    }
+                                }
+                            }
+                        }
                     }
-                    assert(bytesConsumed != 0, "PLYElement.tryDecode consumed at least one byte in producing the PLYElement")
-                    bodyOffset += bytesConsumed
-                    bodyUnsafeRawPointerOffset += bytesConsumed
 
-                    delegate.didRead(element: reusableElement, typeIndex: currentElementGroup, withHeader: elementHeader)
-                    currentElementCountInGroup += 1
-                    while !isComplete && currentElementCountInGroup == header.elements[currentElementGroup].count {
-                        currentElementGroup += 1
-                        currentElementCountInGroup = 0
+                    do {
+                        while let bodyData = try await iterator.next() {
+                            append(to: &buffer, withCapacity: &bufferCapacity, from: bufferSize, data: bodyData)
+                            bufferSize += bodyData.count
+                            guard bufferSize >= targetBufferSize else {
+                                continue
+                            }
+
+                            try processBuffer()
+
+                            if bufferOffset == 0 {
+                                // Buffer contents exist, but no elements were processed. This might mean the bufferCapacity was
+                                // actually too small to contain even a single element. If we don't want to crash (by reading past
+                                // the end of the buffer), we'd better make room
+                                targetBufferSize *= 2
+                                if targetBufferSize > bufferCapacity {
+                                    let newCapacity = targetBufferSize
+                                    let newBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: newCapacity)
+                                    memcpy(newBuffer, buffer, bufferSize)
+                                    buffer.deallocate()
+                                    buffer = newBuffer
+                                    bufferCapacity = newCapacity
+                                }
+                            }
+
+                            if bufferOffset > 0 && bufferSize > 0 {
+                                memmove(buffer, buffer.advanced(by: bufferOffset), bufferSize - bufferOffset)
+                                bufferSize -= bufferOffset
+                            }
+                            bufferOffset = 0
+                        }
+                        if bufferSize > 0 {
+                            try processBuffer()
+                        }
+
+                        if currentElementGroup < header.elements.count {
+                            continuation.finish(throwing: Error.unexpectedEndOfFile)
+                        } else if bufferOffset < bufferSize {
+                            continuation.finish(throwing: Error.unexpectedContentAtEndOfBody)
+                        } else {
+                            continuation.finish()
+                        }
+                    } catch {
+                        continuation.finish(throwing: error)
                     }
                 }
             }
         }
     }
-}
 
-fileprivate extension Data {
-    func hasSuffix(_ data: Data) -> Bool {
-        count >= data.count && self[(count - data.count)...] == data
+    private func append(to buffer: inout UnsafeMutablePointer<UInt8>,
+                        withCapacity currentCapacity: inout Int,
+                        growthFactor: Float = 2.0,
+                        from startIndex: Int,
+                        data: Data) {
+        guard !data.isEmpty else { return }
+        let requiredCapacity = startIndex + data.count
+        if requiredCapacity > currentCapacity {
+            let newCapacity = max(Int(growthFactor * Float(currentCapacity)), requiredCapacity)
+            let newBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: newCapacity)
+            if startIndex > 0 {
+                memcpy(newBuffer, buffer, startIndex)
+            }
+            buffer.deallocate()
+            buffer = newBuffer
+            currentCapacity = newCapacity
+        }
+
+        data.withUnsafeBytes { rawBuf in
+            if let src = rawBuf.baseAddress {
+                memcpy(buffer.advanced(by: startIndex), src, data.count)
+            }
+        }
     }
 }

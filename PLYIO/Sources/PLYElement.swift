@@ -1,7 +1,7 @@
 import Foundation
 
-public struct PLYElement {
-    public enum Property {
+public struct PLYElement: Sendable {
+    public enum Property: Sendable {
         case int8(Int8)
         case uint8(UInt8)
         case int16(Int16)

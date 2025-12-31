@@ -23,107 +23,61 @@ public class SplatPLYSceneReader: SplatSceneReader {
         }
     }
 
-    private let ply: PLYReader
+    private let source: ReaderSource
 
-    public convenience init(_ url: URL) throws {
-        self.init(try PLYReader(url))
-    }
-
-    public convenience init(_ inputStream: InputStream) {
-        self.init(PLYReader(inputStream))
-    }
-
-    public init(_ ply: PLYReader) {
-        self.ply = ply
-    }
-
-    public func read(to delegate: SplatSceneReaderDelegate) {
-        SplatPLYSceneReaderStream().read(ply, to: delegate)
-    }
-}
-
-private class SplatPLYSceneReaderStream {
-    private weak var delegate: SplatSceneReaderDelegate? = nil
-    private var active = false
-    private var elementMapping: ElementInputMapping?
-    private var expectedPointCount: UInt32 = 0
-    private var pointCount: UInt32 = 0
-    private var reusablePoint = SplatScenePoint(position: .zero,
-                                                color: .linearUInt8(.zero),
-                                                opacity: .linearFloat(.zero),
-                                                scale: .exponent(.zero),
-                                                rotation: .init(vector: .zero))
-
-    func read(_ ply: PLYReader, to delegate: SplatSceneReaderDelegate) {
-        self.delegate = delegate
-        active = true
-        elementMapping = nil
-        expectedPointCount = 0
-        pointCount = 0
-
-        ply.read(to: self)
-
-        assert(!active)
-    }
-}
-
-extension SplatPLYSceneReaderStream: PLYReaderDelegate {
-    func didStartReading(withHeader header: PLYHeader) {
-        guard active else { return }
-        guard elementMapping == nil else {
-            delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didStart called while elementMapping is non-nil"))
-            active = false
-            return
+    public init(_ url: URL) throws {
+        guard url.isFileURL else {
+            throw ReaderSource.Error.cannotOpen(url: url)
         }
-
-        do {
-            let elementMapping = try ElementInputMapping.elementMapping(for: header)
-            self.elementMapping = elementMapping
-            expectedPointCount = header.elements[elementMapping.elementTypeIndex].count
-            delegate?.didStartReading(withPointCount: expectedPointCount)
-        } catch {
-            delegate?.didFailReading(withError: error)
-            active = false
-            return
-        }
+        self.source = .url(url)
     }
 
-    func didRead(element: PLYElement, typeIndex: Int, withHeader elementHeader: PLYHeader.Element) {
-        guard active else { return }
-        guard let elementMapping else {
-            delegate?.didFailReading(withError: SplatPLYSceneReader.Error.internalConsistency("didRead(element:typeIndex:withHeader:) called but elementMapping is nil"))
-            active = false
-            return
-        }
-
-        guard typeIndex == elementMapping.elementTypeIndex else { return }
-        do {
-            try elementMapping.apply(from: element, to: &reusablePoint)
-            pointCount += 1
-            delegate?.didRead(points: [ reusablePoint ])
-        } catch {
-            delegate?.didFailReading(withError: error)
-            active = false
-            return
-        }
+    public init(_ data: Data) throws {
+        self.source = .memory(data)
     }
 
-    func didFinishReading() {
-        guard active else { return }
-        guard expectedPointCount == pointCount else {
-            delegate?.didFailReading(withError: SplatPLYSceneReader.Error.unexpectedPointCountDiscrepancy)
-            active = false
-            return
+    public func read() async throws -> AsyncThrowingStream<[SplatScenePoint], Swift.Error> {
+        let (header, plyStream) = try await PLYReader(source).read()
+
+        let elementMapping = try ElementInputMapping.elementMapping(for: header)
+
+        // TODO SCIER: report expected point count
+        return AsyncThrowingStream { continuation in
+            Task {
+                var points = [SplatScenePoint]()
+
+                for try await plyStreamElementSeries in plyStream {
+                    var pointCount = 0
+                    guard plyStreamElementSeries.typeIndex == elementMapping.elementTypeIndex else {
+                        continuation.finish(throwing: Error.unsupportedFileContents("Expected type index \(elementMapping.elementTypeIndex), found \(plyStreamElementSeries.typeIndex)"))
+                        return
+                    }
+
+                    do {
+                        for element in plyStreamElementSeries.elements {
+                            if points.count == pointCount {
+                                points.append(SplatScenePoint(position: .zero,
+                                                              color: .linearUInt8(.zero),
+                                                              opacity: .linearFloat(.zero),
+                                                              scale: .exponent(.zero),
+                                                              rotation: .init(vector: .zero)))
+                            }
+
+                            try points[pointCount].apply(elementMapping, from: element)
+                            pointCount += 1
+                        }
+                    } catch {
+                        continuation.finish(throwing: error)
+                        return
+                    }
+
+                    continuation.yield(Array(points.prefix(pointCount)))
+                }
+                
+                // TODO SCIER: validate expected point count
+                continuation.finish()
+            }
         }
-
-        delegate?.didFinishReading()
-        active = false
-    }
-
-    func didFailReading(withError error: Swift.Error?) {
-        guard active else { return }
-        delegate?.didFailReading(withError: error)
-        active = false
     }
 }
 
@@ -164,7 +118,7 @@ private struct ElementInputMapping {
         let color: Color
         if let sh0_rPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_r),
            let sh0_gPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_g),
-            let sh0_bPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_b) {
+           let sh0_bPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_b) {
             let primaryColorPropertyIndices = SIMD3<Int>(x: sh0_rPropertyIndex, y: sh0_gPropertyIndex, z: sh0_bPropertyIndex)
             if headerElement.hasProperty(forName: "\(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)0") {
                 let individualSphericalHarmonicsPropertyIndices: [Int] = try (0..<sphericalHarmonicsCount).map {
@@ -222,38 +176,40 @@ private struct ElementInputMapping {
                                    rotation2PropertyIndex: rotation2PropertyIndex,
                                    rotation3PropertyIndex: rotation3PropertyIndex)
     }
+}
 
-    func apply(from element: PLYElement, to result: inout SplatScenePoint) throws {
-        result.position = SIMD3(x: try element.float32Value(forPropertyIndex: positionXPropertyIndex),
-                                y: try element.float32Value(forPropertyIndex: positionYPropertyIndex),
-                                z: try element.float32Value(forPropertyIndex: positionZPropertyIndex))
+private extension SplatScenePoint {
+    mutating func apply(_ mapping: ElementInputMapping, from element: PLYElement) throws {
+        position = SIMD3(x: try element.float32Value(forPropertyIndex: mapping.positionXPropertyIndex),
+                         y: try element.float32Value(forPropertyIndex: mapping.positionYPropertyIndex),
+                         z: try element.float32Value(forPropertyIndex: mapping.positionZPropertyIndex))
 
-        switch colorPropertyIndices {
+        switch mapping.colorPropertyIndices {
         case .sphericalHarmonic(let sphericalHarmonicsPropertyIndices):
-            result.color = .sphericalHarmonic(try sphericalHarmonicsPropertyIndices.map {
+            color = .sphericalHarmonic(try sphericalHarmonicsPropertyIndices.map {
                 try SIMD3<Float>(x: element.float32Value(forPropertyIndex: $0.x),
                                  y: element.float32Value(forPropertyIndex: $0.y),
                                  z: element.float32Value(forPropertyIndex: $0.z))
             })
         case .linearFloat256(let propertyIndices):
-            result.color = .linearFloat256(SIMD3(try element.float32Value(forPropertyIndex: propertyIndices.x),
-                                                 try element.float32Value(forPropertyIndex: propertyIndices.y),
-                                                 try element.float32Value(forPropertyIndex: propertyIndices.z)))
+            color = .linearFloat256(SIMD3(try element.float32Value(forPropertyIndex: propertyIndices.x),
+                                          try element.float32Value(forPropertyIndex: propertyIndices.y),
+                                          try element.float32Value(forPropertyIndex: propertyIndices.z)))
         case .linearUInt8(let propertyIndices):
-            result.color = .linearUInt8(SIMD3(try element.uint8Value(forPropertyIndex: propertyIndices.x),
-                                              try element.uint8Value(forPropertyIndex: propertyIndices.y),
-                                              try element.uint8Value(forPropertyIndex: propertyIndices.z)))
+            color = .linearUInt8(SIMD3(try element.uint8Value(forPropertyIndex: propertyIndices.x),
+                                       try element.uint8Value(forPropertyIndex: propertyIndices.y),
+                                       try element.uint8Value(forPropertyIndex: propertyIndices.z)))
         }
 
-        result.scale =
-            .exponent(SIMD3(try element.float32Value(forPropertyIndex: scaleXPropertyIndex),
-                            try element.float32Value(forPropertyIndex: scaleYPropertyIndex),
-                            try element.float32Value(forPropertyIndex: scaleZPropertyIndex)))
-        result.opacity = .logitFloat(try element.float32Value(forPropertyIndex: opacityPropertyIndex))
-        result.rotation.real   = try element.float32Value(forPropertyIndex: rotation0PropertyIndex)
-        result.rotation.imag.x = try element.float32Value(forPropertyIndex: rotation1PropertyIndex)
-        result.rotation.imag.y = try element.float32Value(forPropertyIndex: rotation2PropertyIndex)
-        result.rotation.imag.z = try element.float32Value(forPropertyIndex: rotation3PropertyIndex)
+        scale =
+            .exponent(SIMD3(try element.float32Value(forPropertyIndex: mapping.scaleXPropertyIndex),
+                            try element.float32Value(forPropertyIndex: mapping.scaleYPropertyIndex),
+                            try element.float32Value(forPropertyIndex: mapping.scaleZPropertyIndex)))
+        opacity = .logitFloat(try element.float32Value(forPropertyIndex: mapping.opacityPropertyIndex))
+        rotation.real   = try element.float32Value(forPropertyIndex: mapping.rotation0PropertyIndex)
+        rotation.imag.x = try element.float32Value(forPropertyIndex: mapping.rotation1PropertyIndex)
+        rotation.imag.y = try element.float32Value(forPropertyIndex: mapping.rotation2PropertyIndex)
+        rotation.imag.z = try element.float32Value(forPropertyIndex: mapping.rotation3PropertyIndex)
     }
 }
 

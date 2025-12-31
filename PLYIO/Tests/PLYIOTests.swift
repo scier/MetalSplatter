@@ -3,39 +3,7 @@ import PLYIO
 import Spatial
 
 final class PLYIOTests: XCTestCase {
-    class ContentCounter: PLYReaderDelegate {
-        var header: PLYHeader? = nil
-        var elements: [Int] = []
-        var didFinish = false
-        var didFail = false
-
-        func reset() {
-            header = nil
-            elements = []
-            didFinish = false
-            didFail = false
-        }
-
-        func didStartReading(withHeader header: PLYHeader) {
-            self.header = header
-            elements = Array(repeating: 0, count: header.elements.count)
-        }
-
-        func didRead(element: PLYIO.PLYElement, typeIndex: Int, withHeader elementHeader: PLYIO.PLYHeader.Element) {
-            // XCTAssertEqual(elementHeader.name, header?.elements[typeIndex].name)
-            elements[typeIndex] += 1
-        }
-
-        func didFinishReading() {
-            didFinish = true
-        }
-
-        func didFailReading(withError error: Error?) {
-            didFail = true
-        }
-    }
-
-    class ContentStorage: PLYReaderDelegate {
+    class ContentStorage {
         static func testApproximatelyEqual(lhs: ContentStorage, rhs: ContentStorage) {
             var rhsForgedHeader = rhs.header
             rhsForgedHeader?.format = lhs.header?.format ?? .ascii
@@ -57,114 +25,91 @@ final class PLYIOTests: XCTestCase {
 
         var header: PLYHeader? = nil
         var elements: [[PLYElement]] = []
-        var didFinish = false
-        var didFail = false
 
-        func reset() {
-            header = nil
-            elements = []
-            didFinish = false
-            didFail = false
-        }
-
-        func didStartReading(withHeader header: PLYHeader) {
+        init(_ reader: PLYReader) async throws {
+            let (header, elementStream) = try await reader.read()
             self.header = header
-            elements = Array(repeating: [], count: header.elements.count)
-        }
-
-        func didRead(element: PLYIO.PLYElement, typeIndex: Int, withHeader elementHeader: PLYIO.PLYHeader.Element) {
-            // XCTAssertEqual(elementHeader.name, header?.elements[typeIndex].name)
-            elements[typeIndex].append(element)
-        }
-
-        func didFinishReading() {
-            didFinish = true
-        }
-
-        func didFailReading(withError error: Error?) {
-            didFail = true
+            self.elements = Array(repeating: [], count: header.self.elements.count)
+            for try await elementSeries in elementStream {
+                elements[elementSeries.typeIndex].append(contentsOf: elementSeries.elements)
+            }
         }
     }
 
     let asciiURL = Bundle.module.url(forResource: "beetle.ascii", withExtension: "ply", subdirectory: "TestData")!
     let binaryURL = Bundle.module.url(forResource: "beetle.binary", withExtension: "ply", subdirectory: "TestData")!
 
-    func testReadASCII() throws {
-        try testRead(asciiURL)
+    func testReadASCII() async throws {
+        try await testRead(asciiURL)
     }
 
-    func testReadBinary() throws {
-        try testRead(binaryURL)
+    func testReadBinary() async throws {
+        try await testRead(binaryURL)
     }
 
-    func testASCIIBinaryEqual() throws {
-        try testEqual(asciiURL, binaryURL)
+    func testASCIIBinaryEqual() async throws {
+        try await testEqual(asciiURL, binaryURL)
     }
 
-    func testRewriteASCII() throws {
-        try testReadWriteRead(asciiURL, writeFormat: .ascii)
-        try testReadWriteRead(asciiURL, writeFormat: .binaryBigEndian)
-        try testReadWriteRead(asciiURL, writeFormat: .binaryLittleEndian)
+    func testRewriteASCII() async throws {
+        try await testReadWriteRead(asciiURL, writeFormat: .ascii)
+        try await testReadWriteRead(asciiURL, writeFormat: .binaryBigEndian)
+        try await testReadWriteRead(asciiURL, writeFormat: .binaryLittleEndian)
     }
 
-    func testRewriteBinary() throws {
-        try testReadWriteRead(binaryURL, writeFormat: .ascii)
-        try testReadWriteRead(binaryURL, writeFormat: .binaryBigEndian)
-        try testReadWriteRead(binaryURL, writeFormat: .binaryLittleEndian)
+    func testRewriteBinary() async throws {
+        try await testReadWriteRead(binaryURL, writeFormat: .ascii)
+        try await testReadWriteRead(binaryURL, writeFormat: .binaryBigEndian)
+        try await testReadWriteRead(binaryURL, writeFormat: .binaryLittleEndian)
     }
 
-    func testEqual(_ urlA: URL, _ urlB: URL) throws {
+    func testEqual(_ urlA: URL, _ urlB: URL) async throws {
         let readerA = try PLYReader(urlA)
-        let contentA = ContentStorage()
-        readerA.read(to: contentA)
+        let contentA = try await ContentStorage(readerA)
 
         let readerB = try PLYReader(urlB)
-        let contentB = ContentStorage()
-        readerB.read(to: contentB)
+        let contentB = try await ContentStorage(readerB)
 
         ContentStorage.testApproximatelyEqual(lhs: contentA, rhs: contentB)
     }
 
-    func testReadWriteRead(_ url: URL, writeFormat: PLYHeader.Format) throws {
+    func testReadWriteRead(_ url: URL, writeFormat: PLYHeader.Format) async throws {
         let readerA = try PLYReader(url)
-        let contentA = ContentStorage()
-        readerA.read(to: contentA)
+        let contentA = try await ContentStorage(readerA)
 
-        let memoryOutput = DataOutputStream()
-        memoryOutput.open()
-        let writer = PLYWriter(memoryOutput)
+        let writer = try PLYWriter(to: .memory)
         guard var header = contentA.header else {
             XCTFail("Failed to read input from \(url)")
             return
         }
         header.format = writeFormat
         let elements = Array(contentA.elements.joined())
-        try writer.write(header)
-        try writer.write(elements)
+        try await writer.write(header)
+        try await writer.write(elements)
+        try await writer.close()
+        guard let writtenData = await writer.writtenData else {
+            XCTFail("Failed to get written data from memory writer")
+            return
+        }
 
-        let memoryInput = InputStream(data: memoryOutput.data)
-        memoryInput.open()
-
-        let readerB = PLYReader(memoryInput)
-        let contentB = ContentStorage()
-        readerB.read(to: contentB)
+        let readerB = try PLYReader(writtenData)
+        let contentB = try await ContentStorage(readerB)
 
         ContentStorage.testApproximatelyEqual(lhs: contentA, rhs: contentB)
     }
 
-    func testRead(_ url: URL) throws {
+    func testRead(_ url: URL) async throws {
         let reader = try PLYReader(url)
 
-        let content = ContentCounter()
-        reader.read(to: content)
-        XCTAssertTrue(content.didFinish)
-        XCTAssertFalse(content.didFail)
-        XCTAssertNotNil(content.header)
-        if let header = content.header {
-            XCTAssertEqual(header.elements.count, content.elements.count)
-            for (elementTypeIndex, element) in header.elements.enumerated() where elementTypeIndex < content.elements.count {
-                XCTAssertEqual(Int(element.count), content.elements[elementTypeIndex])
-            }
+        let (header, elements) = try await reader.read()
+        var elementCounts: [Int] = Array.init(repeating: 0, count: header.elements.count)
+        for try await elementSeries in elements {
+            XCTAssertGreaterThanOrEqual(elementSeries.typeIndex, 0)
+            XCTAssertLessThan(elementSeries.typeIndex, header.elements.count)
+            elementCounts[elementSeries.typeIndex] += elementSeries.elements.count
+        }
+        for (elementTypeIndex, element) in header.elements.enumerated() {
+            XCTAssertEqual(Int(element.count), elementCounts[elementTypeIndex])
         }
     }
 }
@@ -198,18 +143,5 @@ extension PLYElement.Property {
         default:
             false
         }
-    }
-}
-
-private class DataOutputStream: OutputStream {
-    var data = Data()
-
-    override func open() {}
-    override func close() {}
-    override var hasSpaceAvailable: Bool { true }
-
-    override func write(_ buffer: UnsafePointer<UInt8>, maxLength length: Int) -> Int {
-        data.append(buffer, count: length)
-        return length
     }
 }

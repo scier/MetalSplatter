@@ -22,44 +22,56 @@ extension PLYElement {
     // Considers only bytes from offset..<(offset+size)
     // May modify the body; after this returns, the body contents are undefined.
     mutating func decodeASCII(type elementHeader: PLYHeader.Element,
-                              fromMutable body: UnsafeMutablePointer<UInt8>,
-                              at offset: Int,
-                              bodySize: Int,
+                              fromBody body: String,
                               elementIndex: Int) throws {
         if properties.count != elementHeader.properties.count {
             properties = Array(repeating: .uint8(0), count: elementHeader.properties.count)
         }
 
-        var stringParser = UnsafeStringParser(data: body, offset: offset, size: bodySize)
+        let strings = body.trimmingCharacters(in: .whitespaces).components(separatedBy: .whitespaces)
+        var stringsIndex = 0
 
         for (i, propertyHeader) in elementHeader.properties.enumerated() {
             switch propertyHeader.type {
             case .primitive(let primitiveType):
-                guard let string = stringParser.nextStringSeparatedByWhitespace() else {
+                guard stringsIndex < strings.count else {
                     throw ASCIIDecodeError.bodyMissingPropertyValuesInElement(elementHeader, elementIndex, propertyHeader)
                 }
-                guard let value = Property.tryDecodeASCIIPrimitive(type: primitiveType, from: string) else {
+                guard let value = Property.tryDecodeASCIIPrimitive(type: primitiveType, from: strings[stringsIndex]) else {
                     throw ASCIIDecodeError.bodyInvalidStringForPropertyType(elementHeader, elementIndex, propertyHeader)
                 }
+                stringsIndex += 1
                 properties[i] = value
             case .list(countType: let countType, valueType: let valueType):
-                guard let countString = stringParser.nextStringSeparatedByWhitespace() else {
+                guard stringsIndex < strings.count else {
                     throw ASCIIDecodeError.bodyMissingPropertyValuesInElement(elementHeader, elementIndex, propertyHeader)
                 }
-                guard let count = Property.tryDecodeASCIIPrimitive(type: countType, from: countString)?.uint64Value else {
+
+                let countString = strings[i]
+                stringsIndex += 1
+                guard let countUInt64 = Property.tryDecodeASCIIPrimitive(type: countType, from: countString)?.uint64Value else {
                     throw ASCIIDecodeError.bodyInvalidStringForPropertyType(elementHeader, elementIndex, propertyHeader)
+                }
+                guard countUInt64 <= Int.max else {
+                    throw ASCIIDecodeError.bodyInvalidStringForPropertyType(elementHeader, elementIndex, propertyHeader)
+                }
+                let count = Int(countUInt64)
+                guard stringsIndex + count <= strings.count else {
+                    throw ASCIIDecodeError.bodyMissingPropertyValuesInElement(elementHeader, elementIndex, propertyHeader)
                 }
 
                 properties[i] = try PLYElement.Property.tryDecodeASCIIList(valueType: valueType,
-                                                                           count: Int(count),
-                                                                           from: &stringParser,
+                                                                           count: count,
+                                                                           from: strings,
+                                                                           atOffset: stringsIndex,
                                                                            elementHeader: elementHeader,
                                                                            elementIndex: elementIndex,
                                                                            propertyHeader: propertyHeader)
+                stringsIndex += Int(count)
             }
         }
 
-        guard stringParser.nextStringSeparatedByWhitespace() == nil else {
+        guard stringsIndex == strings.count else {
             throw ASCIIDecodeError.bodyUnexpectedValuesInElement(elementHeader, elementIndex)
         }
     }
@@ -112,33 +124,34 @@ fileprivate extension PLYElement.Property {
 
     static func tryDecodeASCIIList(valueType: PLYHeader.PrimitivePropertyType,
                                    count: Int,
-                                   from stringParser: inout UnsafeStringParser,
+                                   from strings: [String],
+                                   atOffset stringsOffset: Int,
                                    elementHeader: PLYHeader.Element,
                                    elementIndex: Int,
                                    propertyHeader: PLYHeader.Property) throws -> PLYElement.Property {
-        do {
-            switch valueType {
-            case .int8:
-                return .listInt8(try (0..<count).map { _ in try stringParser.assumeNextElementSeparatedByWhitespace() })
-            case .uint8:
-                return .listUInt8(try (0..<count).map { _ in try stringParser.assumeNextElementSeparatedByWhitespace() })
-            case .int16:
-                return .listInt16(try (0..<count).map { _ in try stringParser.assumeNextElementSeparatedByWhitespace() })
-            case .uint16:
-                return .listUInt16(try (0..<count).map { _ in try stringParser.assumeNextElementSeparatedByWhitespace() })
-            case .int32:
-                return .listInt32(try (0..<count).map { _ in try stringParser.assumeNextElementSeparatedByWhitespace() })
-            case .uint32:
-                return .listUInt32(try (0..<count).map { _ in try stringParser.assumeNextElementSeparatedByWhitespace() })
-            case .float32:
-                return .listFloat32(try (0..<count).map { _ in try stringParser.assumeNextElementSeparatedByWhitespace() })
-            case .float64:
-                return .listFloat64(try (0..<count).map { _ in try stringParser.assumeNextElementSeparatedByWhitespace() })
+        func converted<T: LosslessStringConvertible>(_ s: String) throws -> T {
+            guard let result = T(s) else {
+                throw PLYElement.ASCIIDecodeError.bodyInvalidStringForPropertyType(elementHeader, elementIndex, propertyHeader)
             }
-        } catch UnsafeStringParser.Error.invalidFormat {
-            throw PLYElement.ASCIIDecodeError.bodyInvalidStringForPropertyType(elementHeader, elementIndex, propertyHeader)
-        } catch UnsafeStringParser.Error.unexpectedEndOfData {
-            throw PLYElement.ASCIIDecodeError.bodyMissingPropertyValuesInElement(elementHeader, elementIndex, propertyHeader)
+            return result
+        }
+        switch valueType {
+        case .int8:
+            return .listInt8(try (0..<count).map { i in try converted(strings[stringsOffset + i]) })
+        case .uint8:
+            return .listUInt8(try (0..<count).map { i in try converted(strings[stringsOffset + i]) })
+        case .int16:
+            return .listInt16(try (0..<count).map { i in try converted(strings[stringsOffset + i]) })
+        case .uint16:
+            return .listUInt16(try (0..<count).map { i in try converted(strings[stringsOffset + i]) })
+        case .int32:
+            return .listInt32(try (0..<count).map { i in try converted(strings[stringsOffset + i]) })
+        case .uint32:
+            return .listUInt32(try (0..<count).map { i in try converted(strings[stringsOffset + i]) })
+        case .float32:
+            return .listFloat32(try (0..<count).map { i in try converted(strings[stringsOffset + i]) })
+        case .float64:
+            return .listFloat64(try (0..<count).map { i in try converted(strings[stringsOffset + i]) })
         }
     }
 }
@@ -173,69 +186,4 @@ extension PLYElement.Property: CustomStringConvertible {
         case .listFloat64(let values): "\(values.count) \(values.map(\.description).joined(separator: " "))"
         }
     }
-}
-
-fileprivate struct UnsafeStringParser {
-    enum Error: Swift.Error {
-        case invalidFormat(String)
-        case unexpectedEndOfData
-    }
-
-    var data: UnsafeMutablePointer<UInt8>
-    var offset: Int
-    var size: Int
-    var currentPosition = 0
-
-    mutating func nextStringSeparatedByWhitespace() -> String? {
-        var start = currentPosition
-        var end = start
-        while true {
-            if end == size {
-                guard start < end else { return nil }
-                let s = String(data: Data(bytes: data + offset + start, count: end - start), encoding: .utf8)
-                currentPosition = size
-                return s
-            }
-
-            let byte = (data + offset + end).pointee
-            if byte == PLYReader.Constants.space || byte == 0 {
-                if start == end {
-                    // Starts with a space -- ignore it; strings may be separated by multiple spaces
-                    end += 1
-                    start = end
-                } else {
-                    // Temporarily make this into a null-terminated string for String()'s benefit
-                    let oldEndValue = (data + offset + end).pointee
-                    (data + offset + end).pointee = 0
-                    let s = String(cString: data + offset + start)
-                    (data + offset + end).pointee = oldEndValue
-                    currentPosition = end+1
-                    return s
-                }
-            } else {
-                end += 1
-            }
-        }
-    }
-
-    mutating func nextElementSeparatedByWhitespace<T: LosslessStringConvertible>() throws -> T? {
-        guard let s = nextStringSeparatedByWhitespace() else { return nil }
-        guard let result = T(s) else {
-            throw Error.invalidFormat(s)
-        }
-        return result
-    }
-
-    mutating func assumeNextElementSeparatedByWhitespace<T: LosslessStringConvertible>() throws -> T {
-        guard let result: T = try nextElementSeparatedByWhitespace() else {
-            throw Error.unexpectedEndOfData
-        }
-        return result
-    }
-}
-
-fileprivate func min<T>(_ x: T?, _ y: T?) -> T? where T : Comparable {
-    guard let x else { return y }
-    guard let y else { return x }
-    return min(x, y)
 }

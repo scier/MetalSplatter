@@ -1,6 +1,6 @@
 import Foundation
 
-public struct PLYHeader: Equatable {
+public struct PLYHeader: Equatable, Sendable {
     enum Keyword: String {
         case ply = "ply"
         case format = "format"
@@ -11,13 +11,13 @@ public struct PLYHeader: Equatable {
         case obj_info = "obj_info"
     }
 
-    public enum Format: String, Equatable {
+    public enum Format: String, Equatable, Sendable {
         case ascii
         case binaryLittleEndian = "binary_little_endian"
         case binaryBigEndian = "binary_big_endian"
     }
 
-    public struct Element: Equatable {
+    public struct Element: Equatable, Sendable {
         public var name: String
         public var count: UInt32
         public var properties: [Property]
@@ -33,12 +33,12 @@ public struct PLYHeader: Equatable {
         }
     }
 
-    public enum PropertyType: Equatable {
+    public enum PropertyType: Equatable, Sendable {
         case primitive(PrimitivePropertyType)
         case list(countType: PrimitivePropertyType, valueType: PrimitivePropertyType)
     }
 
-    public enum PrimitivePropertyType: Equatable {
+    public enum PrimitivePropertyType: Equatable, Sendable {
         case int8 // aka char
         case uint8 // aka uchar
         case int16 // aka short
@@ -82,7 +82,7 @@ public struct PLYHeader: Equatable {
         }
     }
 
-    public struct Property: Equatable {
+    public struct Property: Equatable, Sendable {
         public var name: String
         public var type: PropertyType
 

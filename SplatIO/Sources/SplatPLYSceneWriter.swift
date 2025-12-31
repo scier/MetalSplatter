@@ -3,7 +3,7 @@ import PLYIO
 import simd
 
 public class SplatPLYSceneWriter: SplatSceneWriter {
-    enum Error: Swift.Error {
+    public enum Error: Swift.Error {
         case cannotWriteToFile(String)
         case unknownOutputStreamError
         case alreadyStarted
@@ -27,39 +27,42 @@ public class SplatPLYSceneWriter: SplatSceneWriter {
     private var elementBuffer: [PLYElement] = Array.init(repeating: PLYElement(properties: []), count: Constants.elementBufferSize)
     private var elementMapping: ElementOutputMapping?
 
-    public init(_ outputStream: OutputStream) {
-        plyWriter = PLYWriter(outputStream)
+    public init(to destination: WriterDestination) throws {
+        plyWriter = try PLYWriter(to: destination)
     }
 
-    public convenience init(toFileAtPath path: String, append: Bool) throws {
-        guard let outputStream = OutputStream(toFileAtPath: path, append: append) else {
-            throw Error.cannotWriteToFile(path)
-        }
-        self.init(outputStream)
+    public convenience init(toFileAtPath path: String) throws {
+        try self.init(to: .file(URL(fileURLWithPath: path)))
     }
 
-    public func close() throws {
+    public func close() async throws {
         guard !closed else { return }
-        try plyWriter.close()
         closed = true
+        try await plyWriter.close()
+    }
+
+    public var writtenData: Data? {
+        get async {
+            await plyWriter.writtenData
+        }
     }
 
     public func start(sphericalHarmonicDegree: UInt = Constants.defaultSphericalHarmonicDegree,
                       binary: Bool = Constants.defaultBinary,
-                      pointCount: Int) throws {
+                      pointCount: Int) async throws {
         guard elementMapping == nil else {
             throw Error.alreadyStarted
         }
 
         let elementMapping = ElementOutputMapping(sphericalHarmonicDegree: sphericalHarmonicDegree)
         let header = elementMapping.createHeader(format: binary ? .binaryLittleEndian : .ascii, pointCount: pointCount)
-        try plyWriter.write(header)
+        try await plyWriter.write(header)
 
         self.totalPointCount = pointCount
         self.elementMapping = elementMapping
     }
 
-    public func write(_ points: [SplatScenePoint]) throws {
+    public func write(_ points: [SplatScenePoint]) async throws {
         guard let elementMapping else {
             throw Error.notStarted
         }
@@ -76,7 +79,7 @@ public class SplatPLYSceneWriter: SplatSceneWriter {
             elementBuffer[elementBufferOffset].set(to: point, with: elementMapping)
             elementBufferOffset += 1
             if elementBufferOffset == elementBuffer.count || i == points.count-1 {
-                try plyWriter.write(elementBuffer, count: elementBufferOffset)
+                try await plyWriter.write(elementBuffer, count: elementBufferOffset)
                 elementBufferOffset = 0
             }
         }

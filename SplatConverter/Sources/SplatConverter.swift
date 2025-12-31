@@ -1,15 +1,16 @@
 import ArgumentParser
 import Foundation
+import PLYIO
 import SplatIO
 
 @main
-struct SplatConverter: ParsableCommand {
+struct SplatConverter: AsyncParsableCommand {
     enum Error: Swift.Error {
         case unknownReadError(String)
         case unknownWriteError(String)
     }
 
-    static var configuration = CommandConfiguration(
+    static let configuration = CommandConfiguration(
         commandName: "SplatConverter",
         abstract: "A utility for converting splat scene files",
         version: "1.0.0"
@@ -36,7 +37,7 @@ struct SplatConverter: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Verbose output")
     var verbose = false
 
-    func run() throws {
+    func run() async throws {
         let reader = try AutodetectSceneReader(URL(fileURLWithPath: inputFile))
 
         var outputFormat = outputFormat
@@ -53,9 +54,13 @@ struct SplatConverter: ParsableCommand {
                                       describe: describe,
                                       inputLabel: inputFile,
                                       outputLabel: outputFile)
-        let readDuration = ContinuousClock().measure {
-            reader.read(to: delegate)
+        let readDuration = try await ContinuousClock().measure {
+            let stream = try await reader.read()
+            for try await scenePoints in stream {
+                delegate.didRead(points: scenePoints)
+            }
         }
+
         if verbose {
             let pointsPerSecond = Double(delegate.readCount) / max(readDuration.asSeconds, 1e-6)
             print("Read \(delegate.readCount) points from \(inputFile) in \(readDuration.asSeconds.formatted(.number.precision(.fractionLength(2)))) seconds (\(pointsPerSecond.formatted(.number.precision(.fractionLength(0)))) points/s)")
@@ -65,26 +70,24 @@ struct SplatConverter: ParsableCommand {
         }
 
         if let outputFile, let outputFormat {
-            let writeDuration = try ContinuousClock().measure {
-                let writer: (any SplatSceneWriter)
+            let outputURL = URL(fileURLWithPath: outputFile)
+            let writeDuration = try await ContinuousClock().measure {
                 switch outputFormat {
                 case .dotSplat:
-                    writer = try DotSplatSceneWriter(toFileAtPath: outputFile, append: false)
+                    let writer = try DotSplatSceneWriter(to: .file(outputURL))
+                    try await writer.write(delegate.points)
+                    try await writer.close()
                 case .binaryPLY:
-                    let splatPLYWriter = try SplatPLYSceneWriter(toFileAtPath: outputFile, append: false)
-                    try splatPLYWriter.start(sphericalHarmonicDegree: 3, binary: true, pointCount: delegate.points.count)
-                    writer = splatPLYWriter
+                    let writer = try SplatPLYSceneWriter(to: .file(outputURL))
+                    try await writer.start(sphericalHarmonicDegree: 3, binary: true, pointCount: delegate.points.count)
+                    try await writer.write(delegate.points)
+                    try await writer.close()
                 case .asciiPLY:
-                    let splatPLYWriter = try SplatPLYSceneWriter(toFileAtPath: outputFile, append: false)
-                    try splatPLYWriter.start(sphericalHarmonicDegree: 3, binary: false, pointCount: delegate.points.count)
-                    writer = splatPLYWriter
+                    let writer = try SplatPLYSceneWriter(to: .file(outputURL))
+                    try await writer.start(sphericalHarmonicDegree: 3, binary: false, pointCount: delegate.points.count)
+                    try await writer.write(delegate.points)
+                    try await writer.close()
                 }
-
-                defer {
-                    try? writer.close()
-                }
-
-                try writer.write(delegate.points)
             }
 
             if verbose {
@@ -95,7 +98,7 @@ struct SplatConverter: ParsableCommand {
         }
     }
 
-    class ReaderDelegate: SplatSceneReaderDelegate {
+    class ReaderDelegate {
         let save: Bool
         let start: Int
         let count: Int?
@@ -121,8 +124,6 @@ struct SplatConverter: ParsableCommand {
             self.inputLabel = inputLabel
             self.outputLabel = outputLabel
         }
-
-        func didStartReading(withPointCount pointCount: UInt32?) {}
 
         func didRead(points: [SplatIO.SplatScenePoint]) {
             readCount += points.count
@@ -165,12 +166,6 @@ struct SplatConverter: ParsableCommand {
                     print("\(currentOffset + i): \(points[i].description)")
                 }
             }
-        }
-
-        func didFinishReading() {}
-
-        func didFailReading(withError error: (any Swift.Error)?) {
-            self.error = error ?? Error.unknownReadError("Unknown error reading from \(inputLabel)")
         }
     }
 }

@@ -5,17 +5,20 @@ public class AutodetectSceneReader: SplatSceneReader {
         case cannotDetermineFormat
     }
 
-    private let reader: SplatSceneReader
+    private let url: URL
 
     public init(_ url: URL) throws {
-        switch SplatFileFormat(for: url) {
-        case .ply: reader = try SplatPLYSceneReader(url)
-        case .dotSplat: reader = try DotSplatSceneReader(url)
-        case .none: throw Error.cannotDetermineFormat
-        }
+        self.url = url
     }
 
-    public func read(to delegate: any SplatSceneReaderDelegate) {
-        reader.read(to: delegate)
+    public func read() async throws -> AsyncThrowingStream<[SplatScenePoint], Swift.Error> {
+        let reader: SplatSceneReader =
+        switch SplatFileFormat(for: url) {
+        case .ply: try SplatPLYSceneReader(url)
+        case .dotSplat: try DotSplatSceneReader(url)
+        case .none: throw Error.cannotDetermineFormat
+        }
+
+        return try await reader.read()
     }
 }
