@@ -9,7 +9,7 @@ typealias Float16 = Float
 #warning("x86_64 targets are unsupported by MetalSplatter and will fail at runtime. MetalSplatter builds on x86_64 only because Xcode builds Swift Packages as universal binaries and provides no way to override this. When Swift supports Float16 on x86_64, this may be revisited.")
 #endif
 
-public class SplatRenderer {
+public final class SplatRenderer: Sendable {
     enum Constants {
         // Keep in sync with Shaders.metal : maxViewCount
         static let maxViewCount = 2
@@ -467,7 +467,6 @@ public class SplatRenderer {
         return renderEncoder
     }
 
-    @MainActor
     public func render(viewports: [ViewportDescriptor],
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,

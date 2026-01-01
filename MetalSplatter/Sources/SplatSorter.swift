@@ -1,7 +1,6 @@
 import Metal
 import simd
 
-@MainActor
 class SplatSorter<SplatIndexType: BinaryInteger> {
     private enum State {
         case idle
