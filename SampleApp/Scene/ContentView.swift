@@ -69,6 +69,7 @@ struct ContentView: View {
                           allowedContentTypes: [
                             UTType(filenameExtension: "ply")!,
                             UTType(filenameExtension: "splat")!,
+                            UTType(filenameExtension: "spz")!,
                           ]) {
                 isPickingFile = false
                 switch $0 {

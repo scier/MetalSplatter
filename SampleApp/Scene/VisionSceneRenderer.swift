@@ -98,19 +98,13 @@ class VisionSceneRenderer {
 
         let simdDeviceAnchor = deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
 
-        return drawable.views.map { view in
+        return drawable.views.enumerated().map { (index, view) in
             let userViewpointMatrix = (simdDeviceAnchor * view.transform).inverse
-            let projectionMatrix = ProjectiveTransform3D(leftTangent: Double(view.tangents[0]),
-                                                         rightTangent: Double(view.tangents[1]),
-                                                         topTangent: Double(view.tangents[2]),
-                                                         bottomTangent: Double(view.tangents[3]),
-                                                         nearZ: Double(drawable.depthRange.y),
-                                                         farZ: Double(drawable.depthRange.x),
-                                                         reverseZ: true)
+            let projectionMatrix = drawable.computeProjection(viewIndex: index)
             let screenSize = SIMD2(x: Int(view.textureMap.viewport.width),
                                    y: Int(view.textureMap.viewport.height))
             return ModelRendererViewportDescriptor(viewport: view.textureMap.viewport,
-                                                   projectionMatrix: .init(projectionMatrix),
+                                                   projectionMatrix: projectionMatrix,
                                                    viewMatrix: userViewpointMatrix * translationMatrix * rotationMatrix * commonUpCalibration,
                                                    screenSize: screenSize)
         }
@@ -155,7 +149,7 @@ class VisionSceneRenderer {
             semaphore.signal()
         }
 
-        updateRotation()
+       updateRotation()
 
         let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
 

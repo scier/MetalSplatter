@@ -15,6 +15,10 @@ let package = Package(
             targets: [ "PLYIO" ]
         ),
         .library(
+            name: "SPZIO",
+            targets: [ "SPZIO" ]
+        ),
+        .library(
             name: "SplatIO",
             targets: [ "SplatIO" ]
         ),
@@ -48,8 +52,21 @@ let package = Package(
             resources: [ .copy("TestData") ]
         ),
         .target(
+            name: "SPZIO",
+            path: "SPZIO",
+            sources: [ "Sources" ],
+            publicHeadersPath: "Sources/include",
+            cxxSettings: [
+                .headerSearchPath("Sources/cpp"),
+                .unsafeFlags(["-std=c++17"]),
+            ],
+            linkerSettings: [
+                .linkedLibrary("z")
+            ]
+        ),
+        .target(
             name: "SplatIO",
-            dependencies: [ "PLYIO" ],
+            dependencies: [ "PLYIO", "SPZIO" ],
             path: "SplatIO",
             sources: [ "Sources" ]
         ),

@@ -11,6 +11,7 @@ public class AutodetectSceneReader: SplatSceneReader {
         switch SplatFileFormat(for: url) {
         case .ply: reader = try SplatPLYSceneReader(url)
         case .dotSplat: reader = try DotSplatSceneReader(url)
+        case .spz: reader = try SPZSceneReader(url)
         case .none: throw Error.cannotDetermineFormat
         }
     }
