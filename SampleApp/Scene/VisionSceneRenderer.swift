@@ -6,7 +6,6 @@ import MetalSplatter
 import os
 import SampleBoxRenderer
 import simd
-import Spatial
 import SwiftUI
 
 extension LayerRenderer.Clock.Instant.Duration {
@@ -16,7 +15,7 @@ extension LayerRenderer.Clock.Instant.Duration {
     }
 }
 
-class VisionSceneRenderer {
+actor VisionSceneRenderer {
     private static let log =
         Logger(subsystem: Bundle.main.bundleIdentifier!,
                category: "VisionSceneRenderer")
@@ -52,39 +51,39 @@ class VisionSceneRenderer {
         modelRenderer = nil
         switch model {
         case .gaussianSplat(let url):
-            let splat = try SplatRenderer(device: device,
-                                          colorFormat: layerRenderer.configuration.colorFormat,
-                                          depthFormat: layerRenderer.configuration.depthFormat,
-                                          sampleCount: 1,
-                                          maxViewCount: layerRenderer.properties.viewCount,
-                                          maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            let splat = try await MainActor.run {
+                try SplatRenderer(device: device,
+                                  colorFormat: layerRenderer.configuration.colorFormat,
+                                  depthFormat: layerRenderer.configuration.depthFormat,
+                                  sampleCount: 1,
+                                  maxViewCount: layerRenderer.properties.viewCount,
+                                  maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            }
             try await splat.read(from: url)
             modelRenderer = splat
         case .sampleBox:
-            modelRenderer = try! SampleBoxRenderer(device: device,
-                                                   colorFormat: layerRenderer.configuration.colorFormat,
-                                                   depthFormat: layerRenderer.configuration.depthFormat,
-                                                   sampleCount: 1,
-                                                   maxViewCount: layerRenderer.properties.viewCount,
-                                                   maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            modelRenderer = try await MainActor.run {
+                try SampleBoxRenderer(device: device,
+                                      colorFormat: layerRenderer.configuration.colorFormat,
+                                      depthFormat: layerRenderer.configuration.depthFormat,
+                                      sampleCount: 1,
+                                      maxViewCount: layerRenderer.properties.viewCount,
+                                      maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            }
         case .none:
             break
         }
     }
 
-    func startRenderLoop() {
-        Task {
+    nonisolated func startRenderLoop() {
+        Task(executorPreference: RendererTaskExecutor.shared) { [self] in
             do {
-                try await arSession.run([worldTracking])
+                try await self.arSession.run([self.worldTracking])
             } catch {
                 fatalError("Failed to initialize ARSession")
             }
 
-            let renderThread = Thread {
-                self.renderLoop()
-            }
-            renderThread.name = "Render Thread"
-            renderThread.start()
+            await self.renderLoop()
         }
     }
 
@@ -98,19 +97,13 @@ class VisionSceneRenderer {
 
         let simdDeviceAnchor = deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
 
-        return drawable.views.map { view in
+        return drawable.views.enumerated().map { (index, view) in
             let userViewpointMatrix = (simdDeviceAnchor * view.transform).inverse
-            let projectionMatrix = ProjectiveTransform3D(leftTangent: Double(view.tangents[0]),
-                                                         rightTangent: Double(view.tangents[1]),
-                                                         topTangent: Double(view.tangents[2]),
-                                                         bottomTangent: Double(view.tangents[3]),
-                                                         nearZ: Double(drawable.depthRange.y),
-                                                         farZ: Double(drawable.depthRange.x),
-                                                         reverseZ: true)
+            let projectionMatrix = drawable.computeProjection(viewIndex: index)
             let screenSize = SIMD2(x: Int(view.textureMap.viewport.width),
                                    y: Int(view.textureMap.viewport.height))
             return ModelRendererViewportDescriptor(viewport: view.textureMap.viewport,
-                                                   projectionMatrix: .init(projectionMatrix),
+                                                   projectionMatrix: projectionMatrix,
                                                    viewMatrix: userViewpointMatrix * translationMatrix * rotationMatrix * commonUpCalibration,
                                                    screenSize: screenSize)
         }
@@ -135,45 +128,53 @@ class VisionSceneRenderer {
         guard let timing = frame.predictTiming() else { return }
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
 
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            fatalError("Failed to create command buffer")
-        }
-
-        guard let drawable = frame.queryDrawable() else { return }
+        let drawables = frame.queryDrawables()
+        guard !drawables.isEmpty else { return }
 
         _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
 
         frame.startSubmission()
 
-        let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
-        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
-
-        drawable.deviceAnchor = deviceAnchor
-
-        let semaphore = inFlightSemaphore
-        commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
-            semaphore.signal()
-        }
-
         updateRotation()
 
-        let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
+        // Use first drawable for timing/anchor calculations
+        let primaryDrawable = drawables[0]
+        let time = LayerRenderer.Clock.Instant.epoch.duration(to: primaryDrawable.frameTiming.presentationTime).timeInterval
+        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
 
-        do {
-            try modelRenderer?.render(viewports: viewports,
-                                      colorTexture: drawable.colorTextures[0],
-                                      colorStoreAction: .store,
-                                      depthTexture: drawable.depthTextures[0],
-                                      rasterizationRateMap: drawable.rasterizationRateMaps.first,
-                                      renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
-                                      to: commandBuffer)
-        } catch {
-            Self.log.error("Unable to render scene: \(error.localizedDescription)")
+        for (index, drawable) in drawables.enumerated() {
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                fatalError("Failed to create command buffer")
+            }
+
+            drawable.deviceAnchor = deviceAnchor
+
+            // Signal semaphore when the last drawable's command buffer completes
+            if index == drawables.count - 1 {
+                let semaphore = inFlightSemaphore
+                commandBuffer.addCompletedHandler { _ in
+                    semaphore.signal()
+                }
+            }
+
+            let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
+
+            do {
+                try modelRenderer?.render(viewports: viewports,
+                                          colorTexture: drawable.colorTextures[0],
+                                          colorStoreAction: .store,
+                                          depthTexture: drawable.depthTextures[0],
+                                          rasterizationRateMap: drawable.rasterizationRateMaps.first,
+                                          renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
+                                          to: commandBuffer)
+            } catch {
+                Self.log.error("Unable to render scene: \(error.localizedDescription)")
+            }
+
+            drawable.encodePresent(commandBuffer: commandBuffer)
+
+            commandBuffer.commit()
         }
-
-        drawable.encodePresent(commandBuffer: commandBuffer)
-
-        commandBuffer.commit()
 
         frame.endSubmission()
     }
@@ -192,6 +193,21 @@ class VisionSceneRenderer {
                 }
             }
         }
+    }
+}
+
+final class RendererTaskExecutor: TaskExecutor {
+    static let shared = RendererTaskExecutor()
+    private let queue = DispatchQueue(label: "RenderThreadQueue", qos: .userInteractive)
+
+    func enqueue(_ job: UnownedJob) {
+        queue.async {
+            job.runSynchronously(on: self.asUnownedSerialExecutor())
+        }
+    }
+
+    nonisolated func asUnownedSerialExecutor() -> UnownedTaskExecutor {
+        UnownedTaskExecutor(ordinary: self)
     }
 }
 

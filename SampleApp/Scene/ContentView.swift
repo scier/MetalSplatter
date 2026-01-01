@@ -1,5 +1,4 @@
 import SwiftUI
-import RealityKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {

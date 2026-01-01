@@ -1,4 +1,3 @@
-import Foundation
 import Metal
 import simd
 
@@ -9,8 +8,7 @@ public struct ModelRendererViewportDescriptor {
     var screenSize: SIMD2<Int>
 }
 
-public protocol ModelRenderer {
-    @MainActor
+public protocol ModelRenderer: Sendable {
     func render(viewports: [ModelRendererViewportDescriptor],
                 colorTexture: MTLTexture,
                 colorStoreAction: MTLStoreAction,
