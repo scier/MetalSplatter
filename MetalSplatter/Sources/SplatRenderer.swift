@@ -143,8 +143,16 @@ public final class SplatRenderer: Sendable {
 
     public var clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
 
-    public var onSortStart: (() -> Void)?
-    public var onSortComplete: ((TimeInterval) -> Void)?
+    /// Called when a sort starts
+    public var onSortStart: (@Sendable () -> Void)? {
+        get { sorter.onSortStart }
+        set { sorter.onSortStart = newValue }
+    }
+    /// Called when a sort completes. The TimeInterval is the duration of the sort.
+    public var onSortComplete: (@Sendable (TimeInterval) -> Void)? {
+        get { sorter.onSortComplete }
+        set { sorter.onSortComplete = newValue }
+    }
 
     private let library: MTLLibrary
     // Single-stage pipeline
@@ -169,9 +177,8 @@ public final class SplatRenderer: Sendable {
     var cameraWorldPosition: SIMD3<Float> = .zero
     var cameraWorldForward: SIMD3<Float> = .init(x: 0, y: 0, z: -1)
 
-    // splatBuffer contain one entry for each gaussian splat
+    // splatBuffer contains one entry for each gaussian splat
     var splatBuffer: MetalBuffer<Splat>
-    var splatIndexBuffer: MetalBuffer<SplatIndexType>
 
     let sorter: SplatSorter<SplatIndexType>
 
@@ -207,7 +214,6 @@ public final class SplatRenderer: Sendable {
         self.uniforms = UnsafeMutableRawPointer(dynamicUniformBuffers.contents()).bindMemory(to: UniformsArray.self, capacity: 1)
 
         self.splatBuffer = try MetalBuffer(device: device)
-        self.splatIndexBuffer = try MetalBuffer(device: device)
         self.triangleVertexIndexBuffer = try MetalBuffer(device: device)
 
         self.sorter = try SplatSorter(device: device)
@@ -222,6 +228,7 @@ public final class SplatRenderer: Sendable {
     public func reset() {
         splatBuffer.count = 0
         try? splatBuffer.setCapacity(0)
+        sorter.setSplatBuffer(nil)
     }
 
     public func read(from url: URL) async throws {
@@ -379,6 +386,8 @@ public final class SplatRenderer: Sendable {
 
         splatBuffer.append(points.map { Splat($0) })
         needsLocalitySort = true
+
+        sorter.setSplatBuffer(splatBuffer)
     }
 
     public func add(_ point: SplatScenePoint) throws {
@@ -467,24 +476,44 @@ public final class SplatRenderer: Sendable {
         return renderEncoder
     }
 
+    /// Renders the gaussian splats to the given command buffer.
+    ///
+    /// - Parameters:
+    ///   - viewports: The viewport descriptors for rendering (supports multiple viewports for stereo on visionOS)
+    ///   - colorTexture: The texture to render color output to
+    ///   - colorStoreAction: The store action for the color attachment
+    ///   - depthTexture: Optional depth texture for depth output
+    ///   - rasterizationRateMap: Optional rasterization rate map for variable rate shading
+    ///   - renderTargetArrayLength: The render target array length (for layered rendering)
+    ///   - sortTimeout: Maximum time to block the caller in order to wait for a valid sorted index buffer to be available. This does not cause the method to wait for the latest sort to complete, it only causes it to block if no sort at all has completed since the last time the sort was invalidated (e.g. if the splats butter was changed). Passing 0 disables blocking, but may result in a flash after a splat update instead of a dropped frame. Defaults to blocking 0.1s.
+    ///   - commandBuffer: The command buffer to encode rendering commands into
     public func render(viewports: [ViewportDescriptor],
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
+                       sortTimeout: TimeInterval = 0.1,
                        to commandBuffer: MTLCommandBuffer) throws {
         if needsLocalitySort {
             sortSplatsByLocality()
             needsLocalitySort = false
         }
 
-        sorter.retrieveSortIfComplete(activeBuffer: &splatIndexBuffer)
-        sorter.triggerSort(splatBuffer: splatBuffer,
-                           cameraWorldPosition: cameraWorldPosition,
-                           cameraWorldForward: cameraWorldForward,
-                           onStart: onSortStart,
-                           onComplete: onSortComplete)
+        // Update camera pose for sorting
+        sorter.updateCameraPose(position: cameraWorldPosition, forward: cameraWorldForward)
+
+        // Try to get sorted indices, optionally waiting up to sortTimeout
+        var splatIndexBuffer = sorter.tryObtainSortedIndices()
+        if splatIndexBuffer == nil && sortTimeout > 0 {
+            let deadline = Date().addingTimeInterval(sortTimeout)
+            while splatIndexBuffer == nil && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.01)
+                splatIndexBuffer = sorter.tryObtainSortedIndices()
+            }
+        }
+        guard let splatIndexBuffer else { return }
+        defer { sorter.releaseSortedIndices(splatIndexBuffer) }
 
         let splatCount = splatIndexBuffer.count
         guard splatCount != 0 else { return }
@@ -650,6 +679,9 @@ public final class SplatRenderer: Sendable {
 
         // Reorder splatBuffer's values according to sorted indices
         splatBuffer.values.reorderInPlace(fromSourceIndices: sorted)
+
+        // Invalidate sorted index buffers since splat positions have been reordered
+        sorter.invalidateAllBuffers()
     }
 }
 

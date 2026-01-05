@@ -181,16 +181,19 @@ actor VisionSceneRenderer {
 
     func renderLoop() {
         while true {
-            if layerRenderer.state == .invalidated {
-                Self.log.warning("Layer is invalidated")
-                return
-            } else if layerRenderer.state == .paused {
-                layerRenderer.waitUntilRunning()
-                continue
-            } else {
-                autoreleasepool {
+            autoreleasepool {
+                if layerRenderer.state == .invalidated {
+                    Self.log.warning("Layer is invalidated")
+                    return
+                } else if layerRenderer.state == .paused {
+                    layerRenderer.waitUntilRunning()
+                    return
+                } else {
                     self.renderFrame()
                 }
+            }
+            if layerRenderer.state == .invalidated {
+                return
             }
         }
     }
