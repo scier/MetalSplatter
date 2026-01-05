@@ -783,7 +783,7 @@ extension UnsafeMutablePointer {
                     advanced(by: current).initialize(to: temp)
                     break
                 } else {
-                    advanced(by: current).moveAssign(from: advanced(by: next), count: 1)
+                    advanced(by: current).moveUpdate(from: advanced(by: next), count: 1)
                     current = next
                 }
             }
