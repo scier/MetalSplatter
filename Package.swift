@@ -5,9 +5,9 @@ import PackageDescription
 let package = Package(
     name: "MetalSplatter",
     platforms: [
-        .iOS(.v17),
-        .macOS(.v14),
-        .visionOS(.v1),
+        .iOS(.v18),
+        .macOS(.v15),
+        .visionOS(.v2),
     ],
     products: [
         .library(
