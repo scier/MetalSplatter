@@ -2,4 +2,6 @@
 xcuserdata
 DerivedData/
 .swiftpm
+.build
+Package.resolved
 
