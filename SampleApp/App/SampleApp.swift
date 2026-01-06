@@ -20,15 +20,8 @@ struct SampleApp: App {
 #if os(visionOS)
         ImmersiveSpace(for: ModelIdentifier.self) { modelIdentifier in
             CompositorLayer(configuration: ContentStageConfiguration()) { layerRenderer in
-                let renderer = VisionSceneRenderer(layerRenderer)
-                Task {
-                    do {
-                        try await renderer.load(modelIdentifier.wrappedValue)
-                    } catch {
-                        print("Error loading model: \(error.localizedDescription)")
-                    }
-                    renderer.startRenderLoop()
-                }
+                let modelToLoad = modelIdentifier.wrappedValue
+                VisionSceneRenderer.startRendering(layerRenderer, model: modelToLoad)
             }
         }
         .immersionStyle(selection: .constant(immersionStyle), in: immersionStyle)

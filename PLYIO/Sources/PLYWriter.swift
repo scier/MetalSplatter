@@ -157,7 +157,8 @@ public class PLYWriter {
 
     private func dumpBuffer(length: Int) async throws {
         guard length > 0, let buffer else { return }
-        try await outputStream.writeRaw(buffer, length: length)
+        let data = Data(bytesNoCopy: buffer, count: length, deallocator: .none)
+        try await outputStream.write(data)
     }
 
     public func write(_ element: PLYElement) async throws {

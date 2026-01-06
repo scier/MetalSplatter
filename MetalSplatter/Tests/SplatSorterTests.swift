@@ -182,19 +182,24 @@ final class SplatSorterTests: XCTestCase {
         sorter.updateCameraPose(position: SIMD3<Float>(0, 0, 0),
                                 forward: SIMD3<Float>(0, 0, -1))
 
-        var bodyWasCalled = false
-        var receivedBuffer: MetalBuffer<UInt32>?
-
-        await withTimeout(seconds: 2) {
-            await sorter.withSortedIndices { buffer in
-                bodyWasCalled = true
-                receivedBuffer = buffer
-            }
+        // Use a struct to capture results from the closure (Sendable-safe)
+        struct Result: Sendable {
+            let bodyWasCalled: Bool
+            let bufferCount: Int?
         }
 
-        XCTAssertTrue(bodyWasCalled, "Body should be called with valid buffer")
-        XCTAssertNotNil(receivedBuffer, "Body should receive non-nil buffer")
-        XCTAssertEqual(receivedBuffer?.count, 1, "Buffer should have correct count")
+        let result: Result? = await withTimeout(seconds: 2) {
+            var bufferCount: Int?
+            await sorter.withSortedIndices { buffer in
+                bufferCount = buffer.count
+            }
+            return Result(bodyWasCalled: true, bufferCount: bufferCount)
+        }
+
+        XCTAssertNotNil(result, "Operation should complete within timeout")
+        XCTAssertTrue(result?.bodyWasCalled ?? false, "Body should be called with valid buffer")
+        XCTAssertNotNil(result?.bufferCount, "Body should receive non-nil buffer")
+        XCTAssertEqual(result?.bufferCount, 1, "Buffer should have correct count")
     }
 
     // MARK: - Exclusive Access Tests
@@ -463,7 +468,7 @@ final class SplatSorterTests: XCTestCase {
 extension SplatSorterTests {
     /// Helper to run an async operation with a timeout.
     /// Returns nil if the operation times out.
-    func withTimeout<T>(seconds: TimeInterval, operation: @escaping () async -> T?) async -> T? {
+    func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async -> T?) async -> T? {
         await withTaskGroup(of: T?.self) { group in
             group.addTask {
                 await operation()
@@ -482,7 +487,7 @@ extension SplatSorterTests {
     }
 
     /// Helper for void async operations with timeout.
-    func withTimeout(seconds: TimeInterval, operation: @escaping () async -> Void) async {
+    func withTimeout(seconds: TimeInterval, operation: @escaping @Sendable () async -> Void) async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
                 await operation()

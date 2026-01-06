@@ -58,7 +58,8 @@ public class DotSplatSceneWriter: SplatSceneWriter {
                 bytesStored += DotSplatEncodedPoint(points[i]).store(to: buffer, at: bytesStored, bigEndian: false)
             }
 
-            try await outputStream.writeRaw(buffer, length: bytesStored)
+            let data = Data(bytesNoCopy: buffer, count: bytesStored, deallocator: .none)
+            try await outputStream.write(data)
 
             offset += count
         }

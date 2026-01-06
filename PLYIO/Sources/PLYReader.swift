@@ -147,9 +147,11 @@ public class PLYReader {
         return nil
     }
 
-    private func processASCIIBody(header: PLYHeader, iterator: AsyncBufferingInputStream.Iterator) -> AsyncThrowingStream<ElementSeries, Swift.Error> {
+    private func processASCIIBody(header: PLYHeader, iterator: sending AsyncBufferingInputStream.Iterator) -> AsyncThrowingStream<ElementSeries, Swift.Error> {
+        // Move iterator into local var to transfer ownership to the closure
+        let iterator = iterator
         return AsyncThrowingStream { continuation in
-            Task {
+            Task { [iterator] in
                 guard header.elements.count > 0 else {
                     continuation.finish()
                     return
@@ -212,14 +214,17 @@ public class PLYReader {
         }
     }
 
-    private func processBinaryBody(header: PLYHeader, iterator: AsyncBufferingInputStream.Iterator, bigEndian: Bool) -> AsyncThrowingStream<ElementSeries, Swift.Error> {
-        AsyncThrowingStream { continuation in
+    private func processBinaryBody(header: PLYHeader, iterator: sending AsyncBufferingInputStream.Iterator, bigEndian: Bool) -> AsyncThrowingStream<ElementSeries, Swift.Error> {
+        // Move iterator into local var to transfer ownership to the closure
+        let iterator = iterator
+        return AsyncThrowingStream { continuation in
             Task {
                 guard header.elements.count > 0 else {
                     continuation.finish()
                     return
                 }
 
+                let iterator = iterator  // Copy captured iterator for use in async loop
                 var currentElementGroup = 0
                 var currentElementCountInGroup = 0
                 var currentElementHeader = header.elements[currentElementGroup]
@@ -289,7 +294,7 @@ public class PLYReader {
 
                     do {
                         while let bodyData = try await iterator.next() {
-                            append(to: &buffer, withCapacity: &bufferCapacity, from: bufferSize, data: bodyData)
+                            Self.append(to: &buffer, withCapacity: &bufferCapacity, from: bufferSize, data: bodyData)
                             bufferSize += bodyData.count
                             guard bufferSize >= targetBufferSize else {
                                 continue
@@ -337,11 +342,11 @@ public class PLYReader {
         }
     }
 
-    private func append(to buffer: inout UnsafeMutablePointer<UInt8>,
-                        withCapacity currentCapacity: inout Int,
-                        growthFactor: Float = 2.0,
-                        from startIndex: Int,
-                        data: Data) {
+    private static func append(to buffer: inout UnsafeMutablePointer<UInt8>,
+                               withCapacity currentCapacity: inout Int,
+                               growthFactor: Float = 2.0,
+                               from startIndex: Int,
+                               data: Data) {
         guard !data.isEmpty else { return }
         let requiredCapacity = startIndex + data.count
         if requiredCapacity > currentCapacity {

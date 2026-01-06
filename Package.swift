@@ -89,5 +89,5 @@ let package = Package(
             sources: [ "Sources" ]
         ),
     ],
-    swiftLanguageModes: [.v5]
+    swiftLanguageModes: [.v6]
 )

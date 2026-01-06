@@ -1,6 +1,6 @@
 import Foundation
 
-public struct AsyncBufferingInputStream: AsyncSequence {
+public struct AsyncBufferingInputStream: AsyncSequence, Sendable {
     public typealias Element = Data
 
     public enum StreamError: Error {
@@ -13,13 +13,15 @@ public struct AsyncBufferingInputStream: AsyncSequence {
     }
 
     actor StreamReader {
-        private let stream: InputStream
+        // InputStream is not Sendable, but we manage it safely within this actor.
+        // Access is serialized by the actor, and deinit cleanup is safe.
+        private nonisolated(unsafe) let stream: InputStream
         private let bufferSize: Int
         private var pushedbackData: [Data] = []
         private var isOpen = false
         private var isClosed = false
 
-        init(_ stream: InputStream, bufferSize: Int) {
+        init(_ stream: sending InputStream, bufferSize: Int) {
             self.stream = stream
             self.bufferSize = bufferSize
         }
@@ -80,7 +82,7 @@ public struct AsyncBufferingInputStream: AsyncSequence {
         }
     }
 
-    public struct Iterator: AsyncIteratorProtocol {
+    public struct Iterator: AsyncIteratorProtocol, Sendable {
         let reader: StreamReader
 
         public func next() async throws -> Data? {
@@ -94,7 +96,7 @@ public struct AsyncBufferingInputStream: AsyncSequence {
 
     private let reader: StreamReader
 
-    public init(_ stream: InputStream, bufferSize: Int = 16 * 1024) {
+    public init(_ stream: sending InputStream, bufferSize: Int = 16 * 1024) {
         self.reader = StreamReader(stream, bufferSize: bufferSize)
     }
 

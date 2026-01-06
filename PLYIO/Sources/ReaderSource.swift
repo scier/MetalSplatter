@@ -8,7 +8,7 @@ public enum ReaderSource {
     case url(URL)
     case memory(Data)
 
-    public func inputStream() throws -> InputStream {
+    public func inputStream() throws -> sending InputStream {
         switch self {
         case .url(let url):
             guard let inputStream = InputStream(url: url) else {

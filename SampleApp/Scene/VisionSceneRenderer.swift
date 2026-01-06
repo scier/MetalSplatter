@@ -15,7 +15,12 @@ extension LayerRenderer.Clock.Instant.Duration {
     }
 }
 
-actor VisionSceneRenderer {
+/// VisionSceneRenderer manages rendering for visionOS immersive spaces.
+/// It's marked @unchecked Sendable because it manages thread safety manually:
+/// - LayerRenderer access is confined to the render thread
+/// - Model loading uses async/await
+/// - State changes are synchronized through the RendererTaskExecutor
+final class VisionSceneRenderer: @unchecked Sendable {
     private static let log =
         Logger(subsystem: Bundle.main.bundleIdentifier!,
                category: "VisionSceneRenderer")
@@ -24,13 +29,13 @@ actor VisionSceneRenderer {
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
 
-    var model: ModelIdentifier?
-    var modelRenderer: (any ModelRenderer)?
+    private var model: ModelIdentifier?
+    private var modelRenderer: (any ModelRenderer)?
 
     let inFlightSemaphore = DispatchSemaphore(value: Constants.maxSimultaneousRenders)
 
-    var lastRotationUpdateTimestamp: Date? = nil
-    var rotation: Angle = .zero
+    private var lastRotationUpdateTimestamp: Date? = nil
+    private var rotation: Angle = .zero
 
     let arSession: ARKitSession
     let worldTracking: WorldTrackingProvider
@@ -42,6 +47,19 @@ actor VisionSceneRenderer {
 
         worldTracking = WorldTrackingProvider()
         arSession = ARKitSession()
+    }
+
+    /// Static entry point for starting the renderer.
+    static func startRendering(_ layerRenderer: LayerRenderer, model: ModelIdentifier?) {
+        let renderer = VisionSceneRenderer(layerRenderer)
+        Task {
+            do {
+                try await renderer.load(model)
+            } catch {
+                log.error("Error loading model: \(error.localizedDescription)")
+            }
+            renderer.startRenderLoop()
+        }
     }
 
     func load(_ model: ModelIdentifier?) async throws {
@@ -71,15 +89,15 @@ actor VisionSceneRenderer {
         }
     }
 
-    nonisolated func startRenderLoop() {
-        Task(executorPreference: RendererTaskExecutor.shared) { [self] in
+    func startRenderLoop() {
+        Task(executorPreference: RendererTaskExecutor.shared) {
             do {
                 try await self.arSession.run([self.worldTracking])
             } catch {
                 fatalError("Failed to initialize ARSession")
             }
 
-            await self.renderLoop()
+            self.renderLoop()
         }
     }
 
