@@ -51,25 +51,21 @@ actor VisionSceneRenderer {
         modelRenderer = nil
         switch model {
         case .gaussianSplat(let url):
-            let splat = try await MainActor.run {
-                try SplatRenderer(device: device,
-                                  colorFormat: layerRenderer.configuration.colorFormat,
-                                  depthFormat: layerRenderer.configuration.depthFormat,
-                                  sampleCount: 1,
-                                  maxViewCount: layerRenderer.properties.viewCount,
-                                  maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            }
+            let splat = try SplatRenderer(device: device,
+                                          colorFormat: layerRenderer.configuration.colorFormat,
+                                          depthFormat: layerRenderer.configuration.depthFormat,
+                                          sampleCount: 1,
+                                          maxViewCount: layerRenderer.properties.viewCount,
+                                          maxSimultaneousRenders: Constants.maxSimultaneousRenders)
             try await splat.read(from: url)
             modelRenderer = splat
         case .sampleBox:
-            modelRenderer = try await MainActor.run {
-                try SampleBoxRenderer(device: device,
-                                      colorFormat: layerRenderer.configuration.colorFormat,
-                                      depthFormat: layerRenderer.configuration.depthFormat,
-                                      sampleCount: 1,
-                                      maxViewCount: layerRenderer.properties.viewCount,
-                                      maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            }
+            modelRenderer = try SampleBoxRenderer(device: device,
+                                                  colorFormat: layerRenderer.configuration.colorFormat,
+                                                  depthFormat: layerRenderer.configuration.depthFormat,
+                                                  sampleCount: 1,
+                                                  maxViewCount: layerRenderer.properties.viewCount,
+                                                  maxSimultaneousRenders: Constants.maxSimultaneousRenders)
         case .none:
             break
         }

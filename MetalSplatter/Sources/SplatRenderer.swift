@@ -10,7 +10,7 @@ typealias Float16 = Float
 #warning("x86_64 targets are unsupported by MetalSplatter and will fail at runtime. MetalSplatter builds on x86_64 only because Xcode builds Swift Packages as universal binaries and provides no way to override this. When Swift supports Float16 on x86_64, this may be revisited.")
 #endif
 
-public final class SplatRenderer: Sendable {
+public final class SplatRenderer: @unchecked Sendable {
     enum Constants {
         // Keep in sync with Shaders.metal : maxViewCount
         static let maxViewCount = 2
@@ -162,9 +162,9 @@ public final class SplatRenderer: Sendable {
     private let library: MTLLibrary
 
     // splatBuffer contains one entry for each gaussian splat
-    var splatBuffer: MetalBuffer<Splat>
+    private var splatBuffer: MetalBuffer<Splat>
 
-    let sorter: SplatSorter<SplatIndexType>
+    private let sorter: SplatSorter<SplatIndexType>
 
     /// Uniform buffer storage - contains maxSimultaneousRenders uniform buffers that we round-robin through.
     private let dynamicUniformBuffers: MTLBuffer
@@ -224,7 +224,6 @@ public final class SplatRenderer: Sendable {
 
     public var splatCount: Int { splatBuffer.count }
 
-    @MainActor
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
                 depthFormat: MTLPixelFormat,

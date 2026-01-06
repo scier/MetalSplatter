@@ -3,7 +3,7 @@ import MetalKit
 import os
 import simd
 
-public final class SampleBoxRenderer: Sendable {
+public final class SampleBoxRenderer: @unchecked Sendable {
     enum Constants {
         // Keep in sync with Shaders.metal : maxViewCount
         static let maxViewCount = 2
