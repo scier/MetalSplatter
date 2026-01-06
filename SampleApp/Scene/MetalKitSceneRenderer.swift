@@ -114,19 +114,24 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
         updateRotation()
 
+        let didRender: Bool
         do {
-            try modelRenderer.render(viewports: [viewport],
-                                     colorTexture: view.multisampleColorTexture ?? drawable.texture,
-                                     colorStoreAction: view.multisampleColorTexture == nil ? .store : .multisampleResolve,
-                                     depthTexture: view.depthStencilTexture,
-                                     rasterizationRateMap: nil,
-                                     renderTargetArrayLength: 0,
-                                     to: commandBuffer)
+            didRender = try modelRenderer.render(viewports: [viewport],
+                                                 colorTexture: view.multisampleColorTexture ?? drawable.texture,
+                                                 colorStoreAction: view.multisampleColorTexture == nil ? .store : .multisampleResolve,
+                                                 depthTexture: view.depthStencilTexture,
+                                                 rasterizationRateMap: nil,
+                                                 renderTargetArrayLength: 0,
+                                                 to: commandBuffer)
         } catch {
             Self.log.error("Unable to render scene: \(error.localizedDescription)")
+            didRender = false
         }
 
-        commandBuffer.present(drawable)
+        // Only present if rendering occurred; otherwise drop the frame
+        if didRender {
+            commandBuffer.present(drawable)
+        }
 
         commandBuffer.commit()
     }

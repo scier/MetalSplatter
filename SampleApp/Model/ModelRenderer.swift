@@ -9,11 +9,14 @@ public struct ModelRendererViewportDescriptor {
 }
 
 public protocol ModelRenderer: Sendable {
+    /// Renders to the given command buffer.
+    /// - Returns: `true` if rendering was performed, `false` if the frame should be dropped.
+    @discardableResult
     func render(viewports: [ModelRendererViewportDescriptor],
                 colorTexture: MTLTexture,
                 colorStoreAction: MTLStoreAction,
                 depthTexture: MTLTexture?,
                 rasterizationRateMap: MTLRasterizationRateMap?,
                 renderTargetArrayLength: Int,
-                to commandBuffer: MTLCommandBuffer) throws
+                to commandBuffer: MTLCommandBuffer) throws -> Bool
 }

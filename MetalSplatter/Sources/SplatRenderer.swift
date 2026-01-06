@@ -3,6 +3,7 @@ import Metal
 import MetalKit
 import os
 import SplatIO
+import Synchronization
 
 #if arch(x86_64)
 typealias Float16 = Float
@@ -118,7 +119,12 @@ public final class SplatRenderer: Sendable {
     /**
      High-quality depth takes longer, but results in a continuous, more-representative depth buffer result, which is useful for reducing artifacts during Vision Pro's frame reprojection.
      */
-    public var highQualityDepth: Bool = true
+    public let highQualityDepth: Bool
+
+    /**
+     The color to clear the render target to before rendering splats.
+     */
+    public let clearColor: MTLClearColor
 
     private var writeDepth: Bool {
         depthFormat != .invalid
@@ -141,7 +147,6 @@ public final class SplatRenderer: Sendable {
 #endif
     }
 
-    public var clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
 
     /// Called when a sort starts
     public var onSortStart: (@Sendable () -> Void)? {
@@ -155,38 +160,69 @@ public final class SplatRenderer: Sendable {
     }
 
     private let library: MTLLibrary
-    // Single-stage pipeline
-    private var singleStagePipelineState: MTLRenderPipelineState?
-    private var singleStageDepthState: MTLDepthStencilState?
-    // Multi-stage pipeline
-    private var initializePipelineState: MTLRenderPipelineState?
-    private var drawSplatPipelineState: MTLRenderPipelineState?
-    private var drawSplatDepthState: MTLDepthStencilState?
-    private var postprocessPipelineState: MTLRenderPipelineState?
-    private var postprocessDepthState: MTLDepthStencilState?
-
-    // dynamicUniformBuffers contains maxSimultaneousRenders uniforms buffers,
-    // which we round-robin through, one per render; this is managed by switchToNextDynamicBuffer.
-    // uniforms = the i'th buffer (where i = uniformBufferIndex, which varies from 0 to maxSimultaneousRenders-1)
-    var dynamicUniformBuffers: MTLBuffer
-    var uniformBufferOffset = 0
-    var uniformBufferIndex = 0
-    var uniforms: UnsafeMutablePointer<UniformsArray>
-
-    // cameraWorldPosition and Forward vectors are the latest mean camera position across all viewports
-    var cameraWorldPosition: SIMD3<Float> = .zero
-    var cameraWorldForward: SIMD3<Float> = .init(x: 0, y: 0, z: -1)
 
     // splatBuffer contains one entry for each gaussian splat
     var splatBuffer: MetalBuffer<Splat>
 
     let sorter: SplatSorter<SplatIndexType>
 
-    var triangleVertexIndexBuffer: MetalBuffer<UInt32>
+    /// Uniform buffer storage - contains maxSimultaneousRenders uniform buffers that we round-robin through.
+    private let dynamicUniformBuffers: MTLBuffer
+
+    /// State accessed only during render() execution.
+    /// Protected by serial render() enforcement via `isRendering` flag in AccessState.
+    private struct RenderState {
+        // Pipeline caches - lazily built, thread-safe for concurrent GPU use
+
+        // Single-stage pipeline
+        var singleStagePipelineState: MTLRenderPipelineState?
+        var singleStageDepthState: MTLDepthStencilState?
+
+        // Multi-stage pipeline
+        var initializePipelineState: MTLRenderPipelineState?
+        var drawSplatPipelineState: MTLRenderPipelineState?
+        var drawSplatDepthState: MTLDepthStencilState?
+        var postprocessPipelineState: MTLRenderPipelineState?
+        var postprocessDepthState: MTLDepthStencilState?
+
+        // Uniform buffer management - which slot in the ring buffer we're using
+        var uniformBufferOffset: Int = 0
+        var uniformBufferIndex: Int = 0
+        var uniforms: UnsafeMutablePointer<UniformsArray>
+
+        // Index buffer for triangle vertices (grown as needed)
+        var triangleVertexIndexBuffer: MetalBuffer<UInt32>
+
+        // After splats have changed, they need to be re-sorted in Morton order before rendering (including before sorting their indices)
+        var needsLocalitySort: Bool = false
+
+        init(uniforms: UnsafeMutablePointer<UniformsArray>,
+             triangleVertexIndexBuffer: MetalBuffer<UInt32>) {
+            self.uniforms = uniforms
+            self.triangleVertexIndexBuffer = triangleVertexIndexBuffer
+        }
+    }
+    private var renderState: RenderState
+
+    /// State for coordinating render access and splat buffer modifications.
+    private struct AccessState: ~Copyable {
+        /// Number of render operations currently in flight (submitted but not yet completed by GPU).
+        var inFlightRenderCount: Int = 0
+        /// When true, render() is currently executing (encoding commands). Ensures serial render execution.
+        var isRendering: Bool = false
+        /// When true, a caller has exclusive access for modifying the splat buffer.
+        var hasExclusiveAccess: Bool = false
+        /// Queue of continuations waiting for exclusive access. First waiter gets access next.
+        var exclusiveAccessWaiters: [CheckedContinuation<Void, Never>] = []
+    }
+    private let accessState: Mutex<AccessState>
+
+    /// Returns true if exclusive access is currently held. Used for precondition checks.
+    private var hasExclusiveAccess: Bool {
+        accessState.withLock { $0.hasExclusiveAccess }
+    }
 
     public var splatCount: Int { splatBuffer.count }
-
-    private var needsLocalitySort: Bool = false
 
     @MainActor
     public init(device: MTLDevice,
@@ -194,7 +230,9 @@ public final class SplatRenderer: Sendable {
                 depthFormat: MTLPixelFormat,
                 sampleCount: Int,
                 maxViewCount: Int,
-                maxSimultaneousRenders: Int) throws {
+                maxSimultaneousRenders: Int,
+                highQualityDepth: Bool = true,
+                clearColor: MTLClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)) throws {
 #if arch(x86_64)
         fatalError("MetalSplatter is unsupported on Intel architecture (x86_64)")
 #endif
@@ -206,17 +244,25 @@ public final class SplatRenderer: Sendable {
         self.sampleCount = sampleCount
         self.maxViewCount = min(maxViewCount, Constants.maxViewCount)
         self.maxSimultaneousRenders = maxSimultaneousRenders
+        self.highQualityDepth = highQualityDepth
+        self.clearColor = clearColor
 
         let dynamicUniformBuffersSize = UniformsArray.alignedSize * maxSimultaneousRenders
         self.dynamicUniformBuffers = device.makeBuffer(length: dynamicUniformBuffersSize,
                                                        options: .storageModeShared)!
         self.dynamicUniformBuffers.label = "Uniform Buffers"
-        self.uniforms = UnsafeMutableRawPointer(dynamicUniformBuffers.contents()).bindMemory(to: UniformsArray.self, capacity: 1)
+
+        let uniformsPointer = UnsafeMutableRawPointer(dynamicUniformBuffers.contents())
+            .bindMemory(to: UniformsArray.self, capacity: 1)
+        let triangleVertexIndexBuffer = try MetalBuffer<UInt32>(device: device)
+        self.renderState = RenderState(uniforms: uniformsPointer,
+                                        triangleVertexIndexBuffer: triangleVertexIndexBuffer)
 
         self.splatBuffer = try MetalBuffer(device: device)
-        self.triangleVertexIndexBuffer = try MetalBuffer(device: device)
 
         self.sorter = try SplatSorter(device: device)
+
+        self.accessState = Mutex(AccessState())
 
         do {
             library = try device.makeDefaultLibrary(bundle: Bundle.module)
@@ -225,42 +271,101 @@ public final class SplatRenderer: Sendable {
         }
     }
 
-    public func reset() {
-        splatBuffer.count = 0
-        try? splatBuffer.setCapacity(0)
-        sorter.setSplatBuffer(nil)
+    public func reset() async {
+        await withSplatBufferAccess {
+            splatBuffer.count = 0
+            try? splatBuffer.setCapacity(0)
+            sorter.setSplatBuffer(nil)
+        }
     }
 
     public func read(from url: URL) async throws {
         var newPoints = SplatMemoryBuffer()
         try await newPoints.read(from: try AutodetectSceneReader(url))
-        try add(newPoints.points)
+        try await add(newPoints.points)
+    }
+
+    // MARK: - Splat Buffer Access Synchronization
+
+    /// Provides exclusive access to modify the splat buffer.
+    ///
+    /// This method ensures that no renders are in flight before executing the body,
+    /// and prevents new renders from starting until the body completes.
+    /// The calling task suspends (without blocking a thread) until exclusive access is available.
+    /// Multiple concurrent callers are queued and granted access in order.
+    ///
+    /// - Parameter body: A closure that performs modifications to the splat buffer.
+    /// - Returns: The value returned by the body closure.
+    public func withSplatBufferAccess<T>(
+        _ body: () throws -> T
+    ) async rethrows -> T {
+        // Request exclusive access; wait if someone else has it or renders are in flight
+        await withCheckedContinuation { continuation in
+            let readyNow = accessState.withLock { state -> Bool in
+                if !state.hasExclusiveAccess && state.inFlightRenderCount == 0 {
+                    state.hasExclusiveAccess = true
+                    return true
+                }
+                state.exclusiveAccessWaiters.append(continuation)
+                return false
+            }
+            if readyNow {
+                continuation.resume()
+            }
+        }
+
+        defer {
+            let nextWaiter = accessState.withLock { state -> CheckedContinuation<Void, Never>? in
+                if !state.exclusiveAccessWaiters.isEmpty && state.inFlightRenderCount == 0 {
+                    // Pass access directly to next waiter (hasExclusiveAccess stays true)
+                    return state.exclusiveAccessWaiters.removeFirst()
+                }
+                state.hasExclusiveAccess = false
+                return nil
+            }
+            nextWaiter?.resume()
+        }
+
+        return try body()
+    }
+
+    /// Called when a render's command buffer completes on the GPU.
+    private func renderCompleted() {
+        let waiter = accessState.withLock { state -> CheckedContinuation<Void, Never>? in
+            state.inFlightRenderCount -= 1
+            if state.inFlightRenderCount == 0 && !state.hasExclusiveAccess && !state.exclusiveAccessWaiters.isEmpty {
+                state.hasExclusiveAccess = true
+                return state.exclusiveAccessWaiters.removeFirst()
+            }
+            return nil
+        }
+        waiter?.resume()
     }
 
     private func resetPipelineStates() {
-        singleStagePipelineState = nil
-        initializePipelineState = nil
-        drawSplatPipelineState = nil
-        drawSplatDepthState = nil
-        postprocessPipelineState = nil
-        postprocessDepthState = nil
+        renderState.singleStagePipelineState = nil
+        renderState.initializePipelineState = nil
+        renderState.drawSplatPipelineState = nil
+        renderState.drawSplatDepthState = nil
+        renderState.postprocessPipelineState = nil
+        renderState.postprocessDepthState = nil
     }
 
     private func buildSingleStagePipelineStatesIfNeeded() throws {
-        guard singleStagePipelineState == nil else { return }
+        guard renderState.singleStagePipelineState == nil else { return }
 
-        singleStagePipelineState = try buildSingleStagePipelineState()
-        singleStageDepthState = try buildSingleStageDepthState()
+        renderState.singleStagePipelineState = try buildSingleStagePipelineState()
+        renderState.singleStageDepthState = try buildSingleStageDepthState()
     }
 
     private func buildMultiStagePipelineStatesIfNeeded() throws {
-        guard initializePipelineState == nil else { return }
+        guard renderState.initializePipelineState == nil else { return }
 
-        initializePipelineState = try buildInitializePipelineState()
-        drawSplatPipelineState = try buildDrawSplatPipelineState()
-        drawSplatDepthState = try buildDrawSplatDepthState()
-        postprocessPipelineState = try buildPostprocessPipelineState()
-        postprocessDepthState = try buildPostprocessDepthState()
+        renderState.initializePipelineState = try buildInitializePipelineState()
+        renderState.drawSplatPipelineState = try buildDrawSplatPipelineState()
+        renderState.drawSplatDepthState = try buildDrawSplatDepthState()
+        renderState.postprocessPipelineState = try buildPostprocessPipelineState()
+        renderState.postprocessDepthState = try buildPostprocessDepthState()
     }
 
     private func buildSingleStagePipelineState() throws -> MTLRenderPipelineState {
@@ -372,32 +477,42 @@ public final class SplatRenderer: Sendable {
         return device.makeDepthStencilState(descriptor: depthStateDescriptor)!
     }
 
-    public func ensureAdditionalCapacity(_ pointCount: Int) throws {
+    /// Ensures capacity for additional splat points. Must be called within `withSplatBufferAccess`.
+    private func ensureAdditionalCapacityUnsafe(_ pointCount: Int) throws {
+        precondition(hasExclusiveAccess, "Must be called within withSplatBufferAccess")
         try splatBuffer.ensureCapacity(splatBuffer.count + pointCount)
     }
 
-    public func add(_ points: [SplatScenePoint]) throws {
+    /// Adds splat points without synchronization. Must be called within `withSplatBufferAccess`.
+    private func addSplatsUnsafe(_ points: [SplatScenePoint]) throws {
+        precondition(hasExclusiveAccess, "Must be called within withSplatBufferAccess")
         do {
-            try ensureAdditionalCapacity(points.count)
+            try ensureAdditionalCapacityUnsafe(points.count)
         } catch {
             Self.log.error("Failed to grow buffers: \(error)")
-            return
+            throw error
         }
 
         splatBuffer.append(points.map { Splat($0) })
-        needsLocalitySort = true
+        renderState.needsLocalitySort = true
 
         sorter.setSplatBuffer(splatBuffer)
     }
 
-    public func add(_ point: SplatScenePoint) throws {
-        try add([ point ])
+    public func add(_ points: [SplatScenePoint]) async throws {
+        try await withSplatBufferAccess {
+            try addSplatsUnsafe(points)
+        }
+    }
+
+    public func add(_ point: SplatScenePoint) async throws {
+        try await add([ point ])
     }
 
     private func switchToNextDynamicBuffer() {
-        uniformBufferIndex = (uniformBufferIndex + 1) % maxSimultaneousRenders
-        uniformBufferOffset = UniformsArray.alignedSize * uniformBufferIndex
-        uniforms = UnsafeMutableRawPointer(dynamicUniformBuffers.contents() + uniformBufferOffset).bindMemory(to: UniformsArray.self, capacity: 1)
+        renderState.uniformBufferIndex = (renderState.uniformBufferIndex + 1) % maxSimultaneousRenders
+        renderState.uniformBufferOffset = UniformsArray.alignedSize * renderState.uniformBufferIndex
+        renderState.uniforms = UnsafeMutableRawPointer(dynamicUniformBuffers.contents() + renderState.uniformBufferOffset).bindMemory(to: UniformsArray.self, capacity: 1)
     }
 
     private func updateUniforms(forViewports viewports: [ViewportDescriptor],
@@ -409,11 +524,15 @@ public final class SplatRenderer: Sendable {
                                     screenSize: SIMD2(x: UInt32(viewport.screenSize.x), y: UInt32(viewport.screenSize.y)),
                                     splatCount: splatCount,
                                     indexedSplatCount: indexedSplatCount)
-            self.uniforms.pointee.setUniforms(index: i, uniforms)
+            renderState.uniforms.pointee.setUniforms(index: i, uniforms)
         }
+    }
 
-        cameraWorldPosition = viewports.map { Self.cameraWorldPosition(forViewMatrix: $0.viewMatrix) }.mean ?? .zero
-        cameraWorldForward = viewports.map { Self.cameraWorldForward(forViewMatrix: $0.viewMatrix) }.mean?.normalized ?? .init(x: 0, y: 0, z: -1)
+    /// Computes the mean camera world position and forward vector from the given viewports.
+    private static func cameraWorldPose(forViewports viewports: [ViewportDescriptor]) -> (position: SIMD3<Float>, forward: SIMD3<Float>) {
+        let position = viewports.map { cameraWorldPosition(forViewMatrix: $0.viewMatrix) }.mean ?? .zero
+        let forward = viewports.map { cameraWorldForward(forViewMatrix: $0.viewMatrix) }.mean?.normalized ?? .init(x: 0, y: 0, z: -1)
+        return (position, forward)
     }
 
     private static func cameraWorldForward(forViewMatrix view: simd_float4x4) -> simd_float3 {
@@ -450,7 +569,7 @@ public final class SplatRenderer: Sendable {
         renderPassDescriptor.tileHeight = Constants.tileSize.height
 
         if multiStage {
-            if let initializePipelineState {
+            if let initializePipelineState = renderState.initializePipelineState {
                 renderPassDescriptor.imageblockSampleLength = initializePipelineState.imageblockSampleLength
             } else {
                 Self.log.error("initializePipeline == nil in renderEncoder()")
@@ -485,23 +604,67 @@ public final class SplatRenderer: Sendable {
     ///   - depthTexture: Optional depth texture for depth output
     ///   - rasterizationRateMap: Optional rasterization rate map for variable rate shading
     ///   - renderTargetArrayLength: The render target array length (for layered rendering)
-    ///   - sortTimeout: Maximum time to block the caller in order to wait for a valid sorted index buffer to be available. This does not cause the method to wait for the latest sort to complete, it only causes it to block if no sort at all has completed since the last time the sort was invalidated (e.g. if the splats butter was changed). Passing 0 disables blocking, but may result in a flash after a splat update instead of a dropped frame. Defaults to blocking 0.1s.
+    ///   - accessTimeout: Maximum time to block waiting for render access (when exclusive splat buffer access is held, or when maxSimultaneousRenders are already in flight). Defaults to 0.1s.
+    ///   - sortTimeout: Maximum time to block the caller in order to wait for a valid sorted index buffer to be available. This does not cause the method to wait for the latest sort to complete, it only causes it to block if no sort at all has completed since the last time the sort was invalidated (e.g. if the splats buffer was changed). Passing 0 disables blocking, but may result in a flash after a splat update instead of a dropped frame. Defaults to blocking 0.1s.
     ///   - commandBuffer: The command buffer to encode rendering commands into
+    /// - Returns: `true` if rendering was performed, `false` if rendering was skipped (e.g., due to exclusive access timeout or no splats). When `false` is returned, the caller should drop the frame rather than presenting an incomplete render.
+    @discardableResult
     public func render(viewports: [ViewportDescriptor],
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
+                       accessTimeout: TimeInterval = 0.1,
                        sortTimeout: TimeInterval = 0.1,
-                       to commandBuffer: MTLCommandBuffer) throws {
-        if needsLocalitySort {
-            sortSplatsByLocality()
-            needsLocalitySort = false
+                       to commandBuffer: MTLCommandBuffer) throws -> Bool {
+        // Try to acquire render access, respecting exclusive access, serial render, and maxSimultaneousRenders
+        let deadline = Date().addingTimeInterval(accessTimeout)
+        while true {
+            let acquired = accessState.withLock { state -> Bool in
+                if state.hasExclusiveAccess {
+                    return false
+                }
+                if state.isRendering {
+                    return false  // Another render() is in progress - enforce serial execution
+                }
+                if state.inFlightRenderCount >= maxSimultaneousRenders {
+                    return false
+                }
+                state.isRendering = true
+                state.inFlightRenderCount += 1
+                return true
+            }
+            if acquired {
+                break
+            }
+            if Date() >= deadline {
+                return false
+            }
+            Thread.sleep(forTimeInterval: 0.001)
         }
 
-        // Update camera pose for sorting
-        sorter.updateCameraPose(position: cameraWorldPosition, forward: cameraWorldForward)
+        // Clear isRendering when we exit this method (whether by return or throw)
+        defer {
+            accessState.withLock { state in
+                state.isRendering = false
+            }
+        }
+
+        // Add completion handler to signal when GPU work is done.
+        // This must be added early, before any early returns, to ensure the count is always decremented.
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            self?.renderCompleted()
+        }
+
+        if renderState.needsLocalitySort {
+            sortSplatsByLocality()
+            renderState.needsLocalitySort = false
+        }
+
+        // Compute camera pose for sorting
+        let cameraPose = Self.cameraWorldPose(forViewports: viewports)
+        sorter.updateCameraPose(position: cameraPose.position, forward: cameraPose.forward)
 
         // Try to get sorted indices, optionally waiting up to sortTimeout
         var splatIndexBuffer = sorter.tryObtainSortedIndices()
@@ -512,11 +675,11 @@ public final class SplatRenderer: Sendable {
                 splatIndexBuffer = sorter.tryObtainSortedIndices()
             }
         }
-        guard let splatIndexBuffer else { return }
+        guard let splatIndexBuffer else { return false }
         defer { sorter.releaseSortedIndices(splatIndexBuffer) }
 
         let splatCount = splatIndexBuffer.count
-        guard splatCount != 0 else { return }
+        guard splatCount != 0 else { return false }
         let indexedSplatCount = min(splatCount, Constants.maxIndexedSplatCount)
         let instanceCount = (splatCount + indexedSplatCount - 1) / indexedSplatCount
 
@@ -540,27 +703,27 @@ public final class SplatRenderer: Sendable {
                                           for: commandBuffer)
 
         let triangleVertexCount = indexedSplatCount * 6
-        if triangleVertexIndexBuffer.count < triangleVertexCount {
+        if renderState.triangleVertexIndexBuffer.count < triangleVertexCount {
             do {
-                try triangleVertexIndexBuffer.ensureCapacity(triangleVertexCount)
+                try renderState.triangleVertexIndexBuffer.ensureCapacity(triangleVertexCount)
             } catch {
-                return
+                return false
             }
-            triangleVertexIndexBuffer.count = triangleVertexCount
+            renderState.triangleVertexIndexBuffer.count = triangleVertexCount
             for i in 0..<indexedSplatCount {
-                triangleVertexIndexBuffer.values[i * 6 + 0] = UInt32(i * 4 + 0)
-                triangleVertexIndexBuffer.values[i * 6 + 1] = UInt32(i * 4 + 1)
-                triangleVertexIndexBuffer.values[i * 6 + 2] = UInt32(i * 4 + 2)
-                triangleVertexIndexBuffer.values[i * 6 + 3] = UInt32(i * 4 + 1)
-                triangleVertexIndexBuffer.values[i * 6 + 4] = UInt32(i * 4 + 2)
-                triangleVertexIndexBuffer.values[i * 6 + 5] = UInt32(i * 4 + 3)
+                renderState.triangleVertexIndexBuffer.values[i * 6 + 0] = UInt32(i * 4 + 0)
+                renderState.triangleVertexIndexBuffer.values[i * 6 + 1] = UInt32(i * 4 + 1)
+                renderState.triangleVertexIndexBuffer.values[i * 6 + 2] = UInt32(i * 4 + 2)
+                renderState.triangleVertexIndexBuffer.values[i * 6 + 3] = UInt32(i * 4 + 1)
+                renderState.triangleVertexIndexBuffer.values[i * 6 + 4] = UInt32(i * 4 + 2)
+                renderState.triangleVertexIndexBuffer.values[i * 6 + 5] = UInt32(i * 4 + 3)
             }
         }
 
         if multiStage {
-            guard let initializePipelineState,
-                  let drawSplatPipelineState
-            else { return }
+            guard let initializePipelineState = renderState.initializePipelineState,
+                  let drawSplatPipelineState = renderState.drawSplatPipelineState
+            else { return false }
 
             renderEncoder.pushDebugGroup("Initialize")
             renderEncoder.setRenderPipelineState(initializePipelineState)
@@ -569,36 +732,36 @@ public final class SplatRenderer: Sendable {
 
             renderEncoder.pushDebugGroup("Draw Splats")
             renderEncoder.setRenderPipelineState(drawSplatPipelineState)
-            renderEncoder.setDepthStencilState(drawSplatDepthState)
+            renderEncoder.setDepthStencilState(renderState.drawSplatDepthState)
         } else {
-            guard let singleStagePipelineState
-            else { return }
+            guard let singleStagePipelineState = renderState.singleStagePipelineState
+            else { return false }
 
             renderEncoder.pushDebugGroup("Draw Splats")
             renderEncoder.setRenderPipelineState(singleStagePipelineState)
-            renderEncoder.setDepthStencilState(singleStageDepthState)
+            renderEncoder.setDepthStencilState(renderState.singleStageDepthState)
         }
 
-        renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: renderState.uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: BufferIndex.splat.rawValue)
         renderEncoder.setVertexBuffer(splatIndexBuffer.buffer, offset: 0, index: BufferIndex.splatIndex.rawValue)
 
         renderEncoder.drawIndexedPrimitives(type: .triangle,
                                             indexCount: triangleVertexCount,
                                             indexType: .uint32,
-                                            indexBuffer: triangleVertexIndexBuffer.buffer,
+                                            indexBuffer: renderState.triangleVertexIndexBuffer.buffer,
                                             indexBufferOffset: 0,
                                             instanceCount: instanceCount)
 
         if multiStage {
-            guard let postprocessPipelineState
-            else { return }
+            guard let postprocessPipelineState = renderState.postprocessPipelineState
+            else { return false }
 
             renderEncoder.popDebugGroup()
 
             renderEncoder.pushDebugGroup("Postprocess")
             renderEncoder.setRenderPipelineState(postprocessPipelineState)
-            renderEncoder.setDepthStencilState(postprocessDepthState)
+            renderEncoder.setDepthStencilState(renderState.postprocessDepthState)
             renderEncoder.setCullMode(.none)
             renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             renderEncoder.popDebugGroup()
@@ -607,6 +770,7 @@ public final class SplatRenderer: Sendable {
         }
 
         renderEncoder.endEncoding()
+        return true
     }
 
     // Define a bounding box which doesn't quite include all the splats, just most of them

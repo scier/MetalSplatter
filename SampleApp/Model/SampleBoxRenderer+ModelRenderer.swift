@@ -2,13 +2,14 @@ import Metal
 import SampleBoxRenderer
 
 extension SampleBoxRenderer: ModelRenderer {
+    @discardableResult
     public func render(viewports: [ModelRendererViewportDescriptor],
                        colorTexture: MTLTexture,
                        colorStoreAction: MTLStoreAction,
                        depthTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
-                       to commandBuffer: MTLCommandBuffer) throws {
+                       to commandBuffer: MTLCommandBuffer) throws -> Bool {
         let remappedViewports = viewports.map { viewport -> ViewportDescriptor in
             ViewportDescriptor(viewport: viewport.viewport,
                                projectionMatrix: viewport.projectionMatrix,
@@ -22,5 +23,6 @@ extension SampleBoxRenderer: ModelRenderer {
                    rasterizationRateMap: rasterizationRateMap,
                    renderTargetArrayLength: renderTargetArrayLength,
                    to: commandBuffer)
+        return true  // SampleBoxRenderer always renders successfully
     }
 }

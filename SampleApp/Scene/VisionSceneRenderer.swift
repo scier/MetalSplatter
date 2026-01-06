@@ -159,19 +159,24 @@ actor VisionSceneRenderer {
 
             let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
 
+            let didRender: Bool
             do {
-                try modelRenderer?.render(viewports: viewports,
-                                          colorTexture: drawable.colorTextures[0],
-                                          colorStoreAction: .store,
-                                          depthTexture: drawable.depthTextures[0],
-                                          rasterizationRateMap: drawable.rasterizationRateMaps.first,
-                                          renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
-                                          to: commandBuffer)
+                didRender = try modelRenderer?.render(viewports: viewports,
+                                                      colorTexture: drawable.colorTextures[0],
+                                                      colorStoreAction: .store,
+                                                      depthTexture: drawable.depthTextures[0],
+                                                      rasterizationRateMap: drawable.rasterizationRateMaps.first,
+                                                      renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
+                                                      to: commandBuffer) ?? false
             } catch {
                 Self.log.error("Unable to render scene: \(error.localizedDescription)")
+                didRender = false
             }
 
-            drawable.encodePresent(commandBuffer: commandBuffer)
+            // Only present if rendering occurred; otherwise drop the frame
+            if didRender {
+                drawable.encodePresent(commandBuffer: commandBuffer)
+            }
 
             commandBuffer.commit()
         }
