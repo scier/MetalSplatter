@@ -8,6 +8,7 @@ import SampleBoxRenderer
 import simd
 import SwiftUI
 
+@MainActor
 class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     private static let log =
         Logger(subsystem: Bundle.main.bundleIdentifier!,
@@ -45,21 +46,21 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         modelRenderer = nil
         switch model {
         case .gaussianSplat(let url):
-            let splat = try await SplatRenderer(device: device,
-                                                colorFormat: metalKitView.colorPixelFormat,
-                                                depthFormat: metalKitView.depthStencilPixelFormat,
-                                                sampleCount: metalKitView.sampleCount,
-                                                maxViewCount: 1,
-                                                maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            let splat = try SplatRenderer(device: device,
+                                          colorFormat: metalKitView.colorPixelFormat,
+                                          depthFormat: metalKitView.depthStencilPixelFormat,
+                                          sampleCount: metalKitView.sampleCount,
+                                          maxViewCount: 1,
+                                          maxSimultaneousRenders: Constants.maxSimultaneousRenders)
             try await splat.read(from: url)
             modelRenderer = splat
         case .sampleBox:
-            modelRenderer = try! await SampleBoxRenderer(device: device,
-                                                         colorFormat: metalKitView.colorPixelFormat,
-                                                         depthFormat: metalKitView.depthStencilPixelFormat,
-                                                         sampleCount: metalKitView.sampleCount,
-                                                         maxViewCount: 1,
-                                                         maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            modelRenderer = try! SampleBoxRenderer(device: device,
+                                                   colorFormat: metalKitView.colorPixelFormat,
+                                                   depthFormat: metalKitView.depthStencilPixelFormat,
+                                                   sampleCount: metalKitView.sampleCount,
+                                                   maxViewCount: 1,
+                                                   maxSimultaneousRenders: Constants.maxSimultaneousRenders)
         case .none:
             break
         }
