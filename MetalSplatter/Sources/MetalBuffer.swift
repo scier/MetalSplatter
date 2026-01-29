@@ -6,12 +6,12 @@ fileprivate let log =
     Logger(subsystem: Bundle.module.bundleIdentifier ?? "MetalSplatter",
            category: "MetalBuffer")
 
-class MetalBuffer<T>: @unchecked Sendable {
-    enum Error: LocalizedError {
+public class MetalBuffer<T>: @unchecked Sendable {
+    public enum Error: LocalizedError {
         case capacityGreatedThanMaxCapacity(requested: Int, max: Int)
         case bufferCreationFailed
 
-        var errorDescription: String? {
+        public var errorDescription: String? {
             switch self {
             case .capacityGreatedThanMaxCapacity(let requested, let max):
                 "Requested metal buffer size (\(requested)) exceeds device maximum (\(max))"
@@ -21,14 +21,14 @@ class MetalBuffer<T>: @unchecked Sendable {
         }
     }
 
-    let device: MTLDevice
+    public let device: MTLDevice
 
-    var capacity: Int = 0
-    var count: Int = 0
-    var buffer: MTLBuffer
-    var values: UnsafeMutablePointer<T>
+    public var capacity: Int = 0
+    public var count: Int = 0
+    public var buffer: MTLBuffer
+    public var values: UnsafeMutablePointer<T>
 
-    init(device: MTLDevice, capacity: Int = 1) throws {
+    public init(device: MTLDevice, capacity: Int = 1) throws {
         let capacity = max(capacity, 1)
         guard capacity <= Self.maxCapacity(for: device) else {
             throw Error.capacityGreatedThanMaxCapacity(requested: capacity, max: Self.maxCapacity(for: device))
@@ -46,15 +46,15 @@ class MetalBuffer<T>: @unchecked Sendable {
         self.values = UnsafeMutableRawPointer(self.buffer.contents()).bindMemory(to: T.self, capacity: self.capacity)
     }
 
-    static func maxCapacity(for device: MTLDevice) -> Int {
+    public static func maxCapacity(for device: MTLDevice) -> Int {
         device.maxBufferLength / MemoryLayout<T>.stride
     }
 
-    var maxCapacity: Int {
+    public var maxCapacity: Int {
         device.maxBufferLength / MemoryLayout<T>.stride
     }
 
-    func setCapacity(_ newCapacity: Int) throws {
+    public func setCapacity(_ newCapacity: Int) throws {
         let newCapacity = max(newCapacity, 1)
         guard newCapacity != capacity else { return }
         guard capacity <= maxCapacity else {
@@ -78,7 +78,7 @@ class MetalBuffer<T>: @unchecked Sendable {
         self.values = newValues
     }
 
-    func ensureCapacity(_ minimumCapacity: Int) throws {
+    public func ensureCapacity(_ minimumCapacity: Int) throws {
         guard capacity < minimumCapacity else { return }
         try setCapacity(minimumCapacity)
     }
@@ -86,7 +86,7 @@ class MetalBuffer<T>: @unchecked Sendable {
     /// Assumes capacity is available
     /// Returns the index of the value
     @discardableResult
-    func append(_ element: T) -> Int {
+    public func append(_ element: T) -> Int {
         (values + count).pointee = element
         defer { count += 1 }
         return count
@@ -95,7 +95,7 @@ class MetalBuffer<T>: @unchecked Sendable {
     /// Assumes capacity is available.
     /// Returns the index of the first values.
     @discardableResult
-    func append(_ elements: [T]) -> Int {
+    public func append(_ elements: [T]) -> Int {
         (values + count).update(from: elements, count: elements.count)
         defer { count += elements.count }
         return count
@@ -104,7 +104,7 @@ class MetalBuffer<T>: @unchecked Sendable {
     /// Assumes capacity is available
     /// Returns the index of the value
     @discardableResult
-    func append(_ otherBuffer: MetalBuffer<T>, fromIndex: Int) -> Int {
+    public func append(_ otherBuffer: MetalBuffer<T>, fromIndex: Int) -> Int {
         (values + count).pointee = (otherBuffer.values + fromIndex).pointee
         defer { count += 1 }
         return count

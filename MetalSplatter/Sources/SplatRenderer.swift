@@ -1,14 +1,9 @@
 import Foundation
-import Metal
+@preconcurrency import Metal
 import MetalKit
 import os
 import SplatIO
 import Synchronization
-
-#if arch(x86_64)
-typealias Float16 = Float
-#warning("x86_64 targets are unsupported by MetalSplatter and will fail at runtime. MetalSplatter builds on x86_64 only because Xcode builds Swift Packages as universal binaries and provides no way to override this. When Swift supports Float16 on x86_64, this may be revisited.")
-#endif
 
 public final class SplatRenderer: @unchecked Sendable {
     enum Constants {
@@ -25,12 +20,11 @@ public final class SplatRenderer: @unchecked Sendable {
         // with effectively no memory penalty compated to instancing, and slightly better performance than even using all indexing.
         static let maxIndexedSplatCount = 1024
 
-        static let tileSize = MTLSize(width: 32, height: 32, depth: 1)
+        // Chunk indices are UInt16 in ChunkedSplatIndex and ChunkTable.enabledChunkCount,
+        // so the maximum number of simultaneously enabled chunks is UInt16.max.
+        static let maxEnabledChunks = Int(UInt16.max)
 
-        // When performing the splat locality sort, we need to use quantized positions, meaning we need to compute bounds.
-        // It's fine if the bounds doesn't include all the splats, some will be clamped to the outside of the box so will
-        // just get a less efficient locality sort. Let's set the bounds to mean +/- N * std.dev., where N is:
-        static let boundsStdDeviationsForLocalitySort: Float = 2.5
+        static let tileSize = MTLSize(width: 32, height: 32, depth: 1)
     }
 
     private static let log =
@@ -53,9 +47,9 @@ public final class SplatRenderer: @unchecked Sendable {
 
     // Keep in sync with Shaders.metal : BufferIndex
     enum BufferIndex: NSInteger {
-        case uniforms   = 0
-        case splat      = 1
-        case splatIndex = 2
+        case uniforms    = 0
+        case chunkTable  = 1
+        case splatIndex  = 2
     }
 
     // Keep in sync with Shaders.metal : Uniforms
@@ -86,28 +80,22 @@ public final class SplatRenderer: @unchecked Sendable {
         }
     }
 
-    struct PackedHalf3 {
-        var x: Float16
-        var y: Float16
-        var z: Float16
+    // Keep in sync with Shaders.metal : ChunkTable
+    // Expected layout: pointer (8 bytes), enabledChunkCount (2 bytes), padding (6 bytes) = 16 bytes
+    struct GPUChunkTableHeader {
+        var chunksPointer: UInt64  // GPU address of ChunkInfo array
+        var enabledChunkCount: UInt16
+        var _padding: UInt16
+        var _padding2: UInt32
     }
 
-    struct PackedRGBHalf4 {
-        var r: Float16
-        var g: Float16
-        var b: Float16
-        var a: Float16
+    // Keep in sync with Shaders.metal : ChunkInfo
+    // Expected layout: pointer (8 bytes), splatCount (4 bytes), padding (4 bytes) = 16 bytes
+    struct GPUChunkInfo {
+        var splatsPointer: UInt64  // device pointer
+        var splatCount: UInt32
+        var _padding: UInt32
     }
-
-    // Keep in sync with Shaders.metal : Splat
-    struct Splat {
-        var position: MTLPackedFloat3
-        var color: PackedRGBHalf4
-        var covA: PackedHalf3
-        var covB: PackedHalf3
-    }
-
-    public typealias SplatIndexType = UInt32
 
     public let device: MTLDevice
     public let colorFormat: MTLPixelFormat
@@ -147,7 +135,6 @@ public final class SplatRenderer: @unchecked Sendable {
 #endif
     }
 
-
     /// Called when a sort starts
     public var onSortStart: (@Sendable () -> Void)? {
         get { sorter.onSortStart }
@@ -161,10 +148,23 @@ public final class SplatRenderer: @unchecked Sendable {
 
     private let library: MTLLibrary
 
-    // splatBuffer contains one entry for each gaussian splat
-    private var splatBuffer: MetalBuffer<Splat>
+    // MARK: - Chunk Storage
 
-    private let sorter: SplatSorter<SplatIndexType>
+    /// Internal storage for a chunk
+    private struct ChunkEntry {
+        let id: ChunkID
+        var chunk: SplatChunk
+        var isEnabled: Bool
+    }
+
+    private var chunks: [ChunkID: ChunkEntry] = [:]
+    private var nextChunkID: UInt = 0
+
+    /// Maps ChunkID to the contiguous chunk index used by the sorter and shaders.
+    /// Updated when chunks are added, removed, or enabled/disabled.
+    private var chunkIDToIndex: [ChunkID: UInt16] = [:]
+
+    private let sorter: SplatSorter
 
     /// Uniform buffer storage - contains maxSimultaneousRenders uniform buffers that we round-robin through.
     private let dynamicUniformBuffers: MTLBuffer
@@ -193,9 +193,6 @@ public final class SplatRenderer: @unchecked Sendable {
         // Index buffer for triangle vertices (grown as needed)
         var triangleVertexIndexBuffer: MetalBuffer<UInt32>
 
-        // After splats have changed, they need to be re-sorted in Morton order before rendering (including before sorting their indices)
-        var needsLocalitySort: Bool = false
-
         init(uniforms: UnsafeMutablePointer<UniformsArray>,
              triangleVertexIndexBuffer: MetalBuffer<UInt32>) {
             self.uniforms = uniforms
@@ -204,25 +201,33 @@ public final class SplatRenderer: @unchecked Sendable {
     }
     private var renderState: RenderState
 
-    /// State for coordinating render access and splat buffer modifications.
+    /// State for coordinating render access and chunk modifications.
     private struct AccessState: ~Copyable {
         /// Number of render operations currently in flight (submitted but not yet completed by GPU).
         var inFlightRenderCount: Int = 0
         /// When true, render() is currently executing (encoding commands). Ensures serial render execution.
         var isRendering: Bool = false
-        /// When true, a caller has exclusive access for modifying the splat buffer.
+        /// When true, a caller has exclusive access for modifying chunks.
         var hasExclusiveAccess: Bool = false
         /// Queue of continuations waiting for exclusive access. First waiter gets access next.
         var exclusiveAccessWaiters: [CheckedContinuation<Void, Never>] = []
     }
     private let accessState: Mutex<AccessState>
 
+    private enum BufferTag { case chunkTable }
+    private let bufferPool = MTLBufferPool<BufferTag>()
+
     /// Returns true if exclusive access is currently held. Used for precondition checks.
     private var hasExclusiveAccess: Bool {
         accessState.withLock { $0.hasExclusiveAccess }
     }
 
-    public var splatCount: Int { splatBuffer.count }
+    /// Total splat count across all enabled chunks
+    public var splatCount: Int {
+        chunks.values
+            .filter { $0.isEnabled }
+            .reduce(0) { $0 + $1.chunk.splatCount }
+    }
 
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
@@ -257,8 +262,6 @@ public final class SplatRenderer: @unchecked Sendable {
         self.renderState = RenderState(uniforms: uniformsPointer,
                                         triangleVertexIndexBuffer: triangleVertexIndexBuffer)
 
-        self.splatBuffer = try MetalBuffer(device: device)
-
         self.sorter = try SplatSorter(device: device)
 
         self.accessState = Mutex(AccessState())
@@ -270,35 +273,81 @@ public final class SplatRenderer: @unchecked Sendable {
         }
     }
 
-    public func reset() async {
-        await withSplatBufferAccess {
-            splatBuffer.count = 0
-            try? splatBuffer.setCapacity(0)
-            sorter.setSplatBuffer(nil)
+    // MARK: - Chunk Management
+
+    /// Adds a chunk to the renderer. The chunk should not be modified after this method returns, except during withChunkAccess {...}.
+    /// - Parameters:
+    ///   - chunk: The chunk to add
+    ///   - sortByLocality: If true (the default), reorders splats by Morton code to improve cache performance during rendering.
+    ///     Set to false if you need to preserve the original splat ordering, or if you'd like to control performance by calling
+    ///     SplatChunk.sortByLocality() yourself prior to to caling this method.
+    /// - Returns: The assigned chunk ID
+    @discardableResult
+    public func addChunk(_ chunk: SplatChunk, sortByLocality: Bool = true) async -> ChunkID {
+        if sortByLocality {
+            chunk.sortByLocality()
+        }
+
+        return await withChunkAccess {
+            let id = ChunkID(rawValue: nextChunkID)
+            nextChunkID += 1
+
+            chunks[id] = ChunkEntry(
+                id: id,
+                chunk: chunk,
+                isEnabled: true
+            )
+
+            updateSorterChunks()
+            return id
         }
     }
 
-    public func read(from url: URL) async throws {
-        var newPoints = SplatMemoryBuffer()
-        try await newPoints.read(from: try AutodetectSceneReader(url))
-        try await add(newPoints.points)
+    /// Removes a chunk from the renderer.
+    /// - Parameter id: The chunk ID to remove
+    public func removeChunk(_ id: ChunkID) async {
+        await withChunkAccess {
+            chunks.removeValue(forKey: id)
+            updateSorterChunks()
+        }
     }
 
-    // MARK: - Splat Buffer Access Synchronization
+    /// Removes all chunks from the renderer.
+    public func removeAllChunks() async {
+        await withChunkAccess {
+            chunks.removeAll()
+            sorter.setChunks([])
+        }
+    }
 
-    /// Provides exclusive access to modify the splat buffer.
+    /// Enables or disables a chunk for rendering.
+    /// - Parameters:
+    ///   - id: The chunk ID
+    ///   - enabled: Whether the chunk should be rendered
+    public func setChunkEnabled(_ id: ChunkID, enabled: Bool) async {
+        await withChunkAccess {
+            chunks[id]?.isEnabled = enabled
+            updateSorterChunks()
+        }
+    }
+
+    /// Returns whether a chunk is enabled.
+    /// - Parameter id: The chunk ID
+    /// - Returns: true if the chunk is enabled, false otherwise
+    public func isChunkEnabled(_ id: ChunkID) -> Bool {
+        chunks[id]?.isEnabled ?? false
+    }
+
+
+    // MARK: - Private Chunk Helpers
+
+    /// Provides exclusive access to modify chunks.
     ///
     /// This method ensures that no renders are in flight before executing the body,
     /// and prevents new renders from starting until the body completes.
     /// The calling task suspends (without blocking a thread) until exclusive access is available.
     /// Multiple concurrent callers are queued and granted access in order.
-    ///
-    /// - Parameter body: A closure that performs modifications to the splat buffer.
-    /// - Returns: The value returned by the body closure.
-    public func withSplatBufferAccess<T>(
-        _ body: () throws -> T
-    ) async rethrows -> T {
-        // Request exclusive access; wait if someone else has it or renders are in flight
+    private func withChunkAccess<T>(_ body: () throws -> T) async rethrows -> T {
         await withCheckedContinuation { continuation in
             let readyNow = accessState.withLock { state -> Bool in
                 if !state.hasExclusiveAccess && state.inFlightRenderCount == 0 {
@@ -328,6 +377,31 @@ public final class SplatRenderer: @unchecked Sendable {
         return try body()
     }
 
+    private func updateSorterChunks() {
+        // Build the list of enabled chunks for the sorter
+        // Assign contiguous chunk indices for this sort/render cycle
+        var chunkReferences: [SplatSorter.ChunkReference] = []
+        var newChunkIDToIndex: [ChunkID: UInt16] = [:]
+        var index: UInt16 = 0
+
+        for entry in chunks.values where entry.isEnabled {
+            if Int(index) >= Constants.maxEnabledChunks {
+                Self.log.warning("Maximum enabled chunk count (\(Constants.maxEnabledChunks)) exceeded; additional chunks will not be rendered")
+                break
+            }
+
+            chunkReferences.append(SplatSorter.ChunkReference(
+                chunkIndex: index,
+                buffer: entry.chunk.splats
+            ))
+            newChunkIDToIndex[entry.id] = index
+            index += 1
+        }
+
+        chunkIDToIndex = newChunkIDToIndex
+        sorter.setChunks(chunkReferences)
+    }
+
     /// Called when a render's command buffer completes on the GPU.
     private func renderCompleted() {
         let waiter = accessState.withLock { state -> CheckedContinuation<Void, Never>? in
@@ -340,6 +414,8 @@ public final class SplatRenderer: @unchecked Sendable {
         }
         waiter?.resume()
     }
+
+    // MARK: - Pipeline State Building
 
     private func resetPipelineStates() {
         renderState.singleStagePipelineState = nil
@@ -476,38 +552,6 @@ public final class SplatRenderer: @unchecked Sendable {
         return device.makeDepthStencilState(descriptor: depthStateDescriptor)!
     }
 
-    /// Ensures capacity for additional splat points. Must be called within `withSplatBufferAccess`.
-    private func ensureAdditionalCapacityUnsafe(_ pointCount: Int) throws {
-        precondition(hasExclusiveAccess, "Must be called within withSplatBufferAccess")
-        try splatBuffer.ensureCapacity(splatBuffer.count + pointCount)
-    }
-
-    /// Adds splat points without synchronization. Must be called within `withSplatBufferAccess`.
-    private func addSplatsUnsafe(_ points: [SplatScenePoint]) throws {
-        precondition(hasExclusiveAccess, "Must be called within withSplatBufferAccess")
-        do {
-            try ensureAdditionalCapacityUnsafe(points.count)
-        } catch {
-            Self.log.error("Failed to grow buffers: \(error)")
-            throw error
-        }
-
-        splatBuffer.append(points.map { Splat($0) })
-        renderState.needsLocalitySort = true
-
-        sorter.setSplatBuffer(splatBuffer)
-    }
-
-    public func add(_ points: [SplatScenePoint]) async throws {
-        try await withSplatBufferAccess {
-            try addSplatsUnsafe(points)
-        }
-    }
-
-    public func add(_ point: SplatScenePoint) async throws {
-        try await add([ point ])
-    }
-
     private func switchToNextDynamicBuffer() {
         renderState.uniformBufferIndex = (renderState.uniformBufferIndex + 1) % maxSimultaneousRenders
         renderState.uniformBufferOffset = UniformsArray.alignedSize * renderState.uniformBufferIndex
@@ -540,6 +584,51 @@ public final class SplatRenderer: @unchecked Sendable {
 
     private static func cameraWorldPosition(forViewMatrix view: simd_float4x4) -> simd_float3 {
         (view.inverse * SIMD4<Float>(x: 0, y: 0, z: 0, w: 1)).xyz
+    }
+
+    // MARK: - Chunk Table Building
+
+    private func buildChunkTableBuffer(enabledChunks: [(entry: ChunkEntry, chunkIndex: UInt16)]) -> MTLBuffer? {
+        // Layout: header followed by chunks array
+        let headerSize = MemoryLayout<GPUChunkTableHeader>.size
+        let chunkInfoSize = MemoryLayout<GPUChunkInfo>.stride
+        let chunksArraySize = enabledChunks.count * chunkInfoSize
+        let requiredSize = headerSize + chunksArraySize
+
+        // Try to reuse a pooled buffer; allocate only if nil or too small
+        let buffer: MTLBuffer
+        if let pooled = bufferPool.acquire(tag: .chunkTable), pooled.length >= requiredSize {
+            buffer = pooled
+        } else {
+            guard let newBuffer = device.makeBuffer(length: requiredSize, options: .storageModeShared) else {
+                return nil
+            }
+            newBuffer.label = "Chunk Table"
+            buffer = newBuffer
+        }
+
+        let ptr = buffer.contents()
+
+        // Write header at offset 0
+        let headerPtr = ptr.assumingMemoryBound(to: GPUChunkTableHeader.self)
+        headerPtr.pointee = GPUChunkTableHeader(
+            chunksPointer: buffer.gpuAddress + UInt64(headerSize),
+            enabledChunkCount: UInt16(enabledChunks.count),
+            _padding: 0,
+            _padding2: 0
+        )
+
+        // Write chunk info array after header
+        let chunksPtr = ptr.advanced(by: headerSize).assumingMemoryBound(to: GPUChunkInfo.self)
+        for (entry, chunkIndex) in enabledChunks {
+            chunksPtr[Int(chunkIndex)] = GPUChunkInfo(
+                splatsPointer: entry.chunk.splats.buffer.gpuAddress,
+                splatCount: UInt32(entry.chunk.splatCount),
+                _padding: 0
+            )
+        }
+
+        return buffer
     }
 
     func renderEncoder(multiStage: Bool,
@@ -603,8 +692,8 @@ public final class SplatRenderer: @unchecked Sendable {
     ///   - depthTexture: Optional depth texture for depth output
     ///   - rasterizationRateMap: Optional rasterization rate map for variable rate shading
     ///   - renderTargetArrayLength: The render target array length (for layered rendering)
-    ///   - accessTimeout: Maximum time to block waiting for render access (when exclusive splat buffer access is held, or when maxSimultaneousRenders are already in flight). Defaults to 0.1s.
-    ///   - sortTimeout: Maximum time to block the caller in order to wait for a valid sorted index buffer to be available. This does not cause the method to wait for the latest sort to complete, it only causes it to block if no sort at all has completed since the last time the sort was invalidated (e.g. if the splats buffer was changed). Passing 0 disables blocking, but may result in a flash after a splat update instead of a dropped frame. Defaults to blocking 0.1s.
+    ///   - accessTimeout: Maximum time to block waiting for render access (when exclusive chunk access is held, or when maxSimultaneousRenders are already in flight). Defaults to 0.1s.
+    ///   - sortTimeout: Maximum time to block the caller in order to wait for a valid sorted index buffer to be available. This does not cause the method to wait for the latest sort to complete, it only causes it to block if no sort at all has completed since the last time the sort was invalidated (e.g. if chunks were changed). Passing 0 disables blocking, but may result in a flash after a chunk update instead of a dropped frame. Defaults to blocking 0.1s.
     ///   - commandBuffer: The command buffer to encode rendering commands into
     /// - Returns: `true` if rendering was performed, `false` if rendering was skipped (e.g., due to exclusive access timeout or no splats). When `false` is returned, the caller should drop the frame rather than presenting an incomplete render.
     @discardableResult
@@ -656,10 +745,14 @@ public final class SplatRenderer: @unchecked Sendable {
             self?.renderCompleted()
         }
 
-        if renderState.needsLocalitySort {
-            sortSplatsByLocality()
-            renderState.needsLocalitySort = false
+        // Build list of enabled chunks with their sort indices (from the stored mapping)
+        var enabledChunks: [(entry: ChunkEntry, chunkIndex: UInt16)] = []
+        for entry in chunks.values where entry.isEnabled {
+            guard let chunkIndex = chunkIDToIndex[entry.id] else { continue }
+            enabledChunks.append((entry, chunkIndex))
         }
+
+        guard !enabledChunks.isEmpty else { return false }
 
         // Compute camera pose for sorting
         let cameraPose = Self.cameraWorldPose(forViewports: viewports)
@@ -679,11 +772,22 @@ public final class SplatRenderer: @unchecked Sendable {
 
         let splatCount = splatIndexBuffer.count
         guard splatCount != 0 else { return false }
+
         let indexedSplatCount = min(splatCount, Constants.maxIndexedSplatCount)
         let instanceCount = (splatCount + indexedSplatCount - 1) / indexedSplatCount
 
         switchToNextDynamicBuffer()
         updateUniforms(forViewports: viewports, splatCount: UInt32(splatCount), indexedSplatCount: UInt32(indexedSplatCount))
+
+        // Build chunk table buffer (from pool if available)
+        guard let chunkTableBuffer = buildChunkTableBuffer(enabledChunks: enabledChunks) else {
+            return false
+        }
+
+        // Return buffer to pool when GPU is done
+        commandBuffer.addCompletedHandler { [bufferPool, chunkTableBuffer] _ in
+            bufferPool.release(chunkTableBuffer, tag: .chunkTable)
+        }
 
         let multiStage = useMultiStagePipeline
         if multiStage {
@@ -742,8 +846,13 @@ public final class SplatRenderer: @unchecked Sendable {
         }
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: renderState.uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-        renderEncoder.setVertexBuffer(splatBuffer.buffer, offset: 0, index: BufferIndex.splat.rawValue)
+        renderEncoder.setVertexBuffer(chunkTableBuffer, offset: 0, index: BufferIndex.chunkTable.rawValue)
         renderEncoder.setVertexBuffer(splatIndexBuffer.buffer, offset: 0, index: BufferIndex.splatIndex.rawValue)
+
+        // Make splat buffers resident - required when accessing via GPU addresses embedded in chunk table
+        for (entry, _) in enabledChunks {
+            renderEncoder.useResource(entry.chunk.splats.buffer, usage: .read, stages: .vertex)
+        }
 
         renderEncoder.drawIndexedPrimitives(type: .triangle,
                                             indexCount: triangleVertexCount,
@@ -772,113 +881,14 @@ public final class SplatRenderer: @unchecked Sendable {
         return true
     }
 
-    // Define a bounding box which doesn't quite include all the splats, just most of them
-    private func bounds(withinSigmaMultiple sigmaMultiple: Float) -> (min: SIMD3<Float>, max: SIMD3<Float>) {
-        var sum = SIMD3<Float>.zero
-        var sumOfSquares = SIMD3<Float>.zero
-        let count = Float(splatBuffer.count)
-        for i in 0..<splatBuffer.count {
-            let p = splatBuffer.values[i].position
-            let position = SIMD3<Float>(p.x, p.y, p.z)
-            sum += position
-            sumOfSquares += position * position
-        }
-        let mean = sum / count
-        let variance = sumOfSquares / count - mean * mean
-        let sigma = SIMD3<Float>(x: sqrt(variance.x), y: sqrt(variance.y), z: sqrt(variance.z))
+    // MARK: - Locality Sort
 
-        let minBounds = mean - sigmaMultiple * sigma
-        let maxBounds = mean + sigmaMultiple * sigma
-
-        return (min: minBounds, max: maxBounds)
-    }
-
-    /// Sorts splatBuffer by their position's Morton code, in order to improve memory locality: adjacent splats in memory will tend to be nearby in space as well.
-    /// This helps improve the tiling/cache performance of the vertex shader.
-    private func sortSplatsByLocality() {
-        guard splatBuffer.count > 3 else { return }
-
-        let (minBounds, maxBounds) = bounds(withinSigmaMultiple: Constants.boundsStdDeviationsForLocalitySort)
-        let boundsSize = maxBounds - minBounds
-        guard boundsSize.x > 0 && boundsSize.y > 0 && boundsSize.z > 0 else {
-            return
-        }
-        let invBoundsSize = 1/boundsSize
-
-        // Quantize a value into a 10-bit unsigned integers
-        func quantize(_ value: Float, _ minBounds: Float, _ invBoundsSize: Float) -> UInt32 {
-            let normalizedValue = (value - minBounds) * invBoundsSize
-            let clamped = max(min(normalizedValue, 1), 0)
-            return UInt32(clamped * 1023.0)
-        }
-        // Quantize a splat position into 10-bit unsigned integers per axis
-        func quantize(_ p: SIMD3<Float>) -> SIMD3<UInt32> {
-            SIMD3<UInt32>(quantize(p.x, minBounds.x, invBoundsSize.x),
-                          quantize(p.y, minBounds.y, invBoundsSize.y),
-                          quantize(p.z, minBounds.z, invBoundsSize.z))
-        }
-
-        // Encode quantized coordinate into a single Morton code
-        func morton3D(_ p: SIMD3<UInt32>) -> UInt32 {
-            var result: UInt32 = 0
-            for i in 0..<10 {
-                result |= ((p.x >> i) & 1) << (3 * i + 0)
-                result |= ((p.y >> i) & 1) << (3 * i + 1)
-                result |= ((p.z >> i) & 1) << (3 * i + 2)
-            }
-            return result
-        }
-
-        // Create array of (index, morton code) pairs by directly accessing splatBuffer.values
-        let indicesWithMortonCodes: [(Int, UInt32)] = (0..<splatBuffer.count).map { i in
-            let position = splatBuffer.values[i].position
-            let simdPosition = SIMD3<Float>(x: position.x, y: position.y, z: position.z)
-            let morton = morton3D(quantize(simdPosition))
-            return (i, morton)
-        }
-
-        // Sort indices by their Morton code
-        let sorted = indicesWithMortonCodes.sorted { $0.1 < $1.1 }.map(\.0)
-
-        // Reorder splatBuffer's values according to sorted indices
-        splatBuffer.values.reorderInPlace(fromSourceIndices: sorted)
-
-        // Invalidate sorted index buffers since splat positions have been reordered
-        sorter.invalidateAllBuffers()
+    public func optimize(_ chunk: SplatChunk) {
+        chunk.sortByLocality()
     }
 }
 
-extension SplatRenderer.Splat {
-    init(_ splat: SplatScenePoint) {
-        self.init(position: splat.position,
-                  color: .init(splat.color.asLinearFloat.sRGBToLinear, splat.opacity.asLinearFloat),
-                  scale: splat.scale.asLinearFloat,
-                  rotation: splat.rotation.normalized)
-    }
-
-    init(position: SIMD3<Float>,
-         color: SIMD4<Float>,
-         scale: SIMD3<Float>,
-         rotation: simd_quatf) {
-        let transform = simd_float3x3(rotation) * simd_float3x3(diagonal: scale)
-        let cov3D = transform * transform.transpose
-        self.init(position: MTLPackedFloat3Make(position.x, position.y, position.z),
-                  color: SplatRenderer.PackedRGBHalf4(r: Float16(color.x), g: Float16(color.y), b: Float16(color.z), a: Float16(color.w)),
-                  covA: SplatRenderer.PackedHalf3(x: Float16(cov3D[0, 0]), y: Float16(cov3D[0, 1]), z: Float16(cov3D[0, 2])),
-                  covB: SplatRenderer.PackedHalf3(x: Float16(cov3D[1, 1]), y: Float16(cov3D[1, 2]), z: Float16(cov3D[2, 2])))
-    }
-}
-
-protocol MTLIndexTypeProvider {
-    static var asMTLIndexType: MTLIndexType { get }
-}
-
-extension UInt32: MTLIndexTypeProvider {
-    static var asMTLIndexType: MTLIndexType { .uint32 }
-}
-extension UInt16: MTLIndexTypeProvider {
-    static var asMTLIndexType: MTLIndexType { .uint16 }
-}
+// MARK: - Helper Extensions
 
 extension Array where Element == SIMD3<Float> {
     var mean: SIMD3<Float>? {
@@ -902,12 +912,6 @@ extension SIMD3 where Scalar: BinaryFloatingPoint, Scalar.RawSignificand: FixedW
 
     static func random(in range: Range<Scalar>) -> SIMD3<Scalar> {
         Self(x: Scalar.random(in: range), y: .random(in: range), z: .random(in: range))
-    }
-}
-
-private extension SIMD3<Float> {
-    var sRGBToLinear: SIMD3<Float> {
-        SIMD3(x: pow(x, 2.2), y: pow(y, 2.2), z: pow(z, 2.2))
     }
 }
 

@@ -93,9 +93,7 @@ final class SplatIOTests: XCTestCase {
     func testRead(_ url: URL) async throws {
         let reader = try AutodetectSceneReader(url)
 
-        let points = try await reader.read()
-        for try await point in points {
-        }
+        _ = try await reader.read()
     }
 }
 

@@ -4,12 +4,12 @@ import simd
 import Synchronization
 
 /**
- SplatSorter creates a sorted list of splat indices. It is given a reference to an array of splats
- (a MetalBuffer<SplatRenderer.Splat>), which may be periodically replaced with a new array using the
- exclusive access mechanism described below. On each frame, a renderer provides the latest camera pose,
- and then obtains a reference to the latest sorted list of splat indices, which may be one or more frames
- out-of-date. After rendering is completed, it explicitly releases this reference. Between obtaining and
- releasing this reference, the buffer is guaranteed not to be modified.
+ SplatSorter creates a sorted list of splat indices across multiple chunks. It is given a reference to
+ an array of chunk buffers (each a MetalBuffer<EncodedSplat>), which may be periodically updated
+ using the exclusive access mechanism described below. On each frame, a renderer provides the latest camera
+ pose, and then obtains a reference to the latest sorted list of chunked splat indices, which may be one or
+ more frames out-of-date. After rendering is completed, it explicitly releases this reference. Between
+ obtaining and releasing this reference, the buffer is guaranteed not to be modified.
 
  ## Buffer Management
 
@@ -48,10 +48,10 @@ import Synchronization
  ## Sorting
 
  The splat sorter maintains an asynchronous sorting loop on a secondary thread, running whenever the camera
- pose or splat array has changed since the last sort began. Each sort iteration:
- 1. Updates an internal list with the depth to each splat
+ pose or chunk data has changed since the last sort began. Each sort iteration:
+ 1. Iterates over all enabled chunks and computes depth for each splat
  2. Sorts that list by depth
- 3. Writes the sorted indices to a buffer, which becomes valid and available for new frames
+ 3. Writes the sorted indices (chunk index + local splat index) to a buffer, which becomes valid
 
  When starting a new sort, the sorter selects any buffer with reference count zero. If no such buffer
  exists, the sort awaits until one becomes available.
@@ -59,44 +59,24 @@ import Synchronization
  If invalidation is requested while a sort is in progress, the resulting buffer is pre-marked as invalid,
  effectively canceling that sort's usefulness without the complexity of actual cancellation.
 
- ## Exclusive Access for Splat Array Updates
+ ## Exclusive Access for Chunk Updates
 
- To safely update the splat array, callers use:
+ To safely update chunks, callers use:
 
  ```swift
  func withExclusiveAccess(invalidateIndexBuffers: Bool = true, _ body: () async throws -> Void) async rethrows
  ```
 
  This method:
- 1. Awaits until the sorter is not actively reading the splat array (not in phase 1 of a sort)
+ 1. Awaits until the sorter is not actively reading chunk data (not in phase 1 of a sort)
  2. While the body executes, blocks new sort iterations from starting and new buffer references from
     being obtained (callers await until exclusive access ends)
  3. If `invalidateIndexBuffers` is true (the default): awaits until all buffer references are released,
     then marks all buffers as invalid (preventing references until a new sort completes)
  4. If `invalidateIndexBuffers` is false: allows existing frames to continue using their (now potentially
     stale) buffer references—useful when merely appending new splats where existing indices remain valid
-
- Example - removing splats (requires invalidation, the default):
- ```swift
- await sorter.withExclusiveAccess {
-     splatBuffer = newShorterBuffer
- }
- ```
-
- Example - appending splats (no invalidation needed):
- ```swift
- await sorter.withExclusiveAccess(invalidateIndexBuffers: false) {
-     splatBuffer.append(contentsOf: newSplats)
- }
- ```
-
- ## Implementation Notes
-
- Swift Concurrency is used in the API, but primarily to protect class state. Callers rarely wait for sorts
- to complete. A Mutex is used rather than an actor for low-latency coordination—we don't want to risk
- blocking the render thread.
  */
-class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable {
+class SplatSorter: @unchecked Sendable {
 
     // MARK: - Constants
 
@@ -105,8 +85,14 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
 
     // MARK: - Types
 
+    /// Represents a chunk for sorting purposes
+    struct ChunkReference {
+        let chunkIndex: UInt16
+        let buffer: MetalBuffer<EncodedSplat>
+    }
+
     private struct IndexBuffer {
-        let buffer: MetalBuffer<SplatIndexType>
+        let buffer: MetalBuffer<ChunkedSplatIndex>
         var referenceCount: Int = 0
         var isValid: Bool = false
     }
@@ -119,8 +105,8 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
         var pendingInvalidation: Bool = false  // If true, in-progress sort result should be marked invalid
         var cameraPose: CameraPose? = nil
         var needsSort: Bool = false
-        var splatBuffer: MetalBuffer<SplatRenderer.Splat>? = nil
-        var isReadingSplatBuffer: Bool = false  // True during phase 1 of sort (reading splat positions)
+        var chunks: [ChunkReference] = []
+        var isReadingChunks: Bool = false  // True during phase 1 of sort (reading splat positions)
         var sortLoopRunning: Bool = false
     }
 
@@ -142,10 +128,11 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
     var onSortComplete: (@Sendable (TimeInterval) -> Void)?
 
     // Temporary storage for sorting (reused across iterations, only accessed from sort task)
-    private var sortTempStorage: [SplatIndexAndDepth] = []
+    private var sortTempStorage: [SplatReferenceAndDepth] = []
 
-    private struct SplatIndexAndDepth {
-        var index: SplatIndexType
+    private struct SplatReferenceAndDepth {
+        var chunkIndex: UInt16
+        var splatIndex: UInt32
         var depth: Float
     }
 
@@ -156,27 +143,33 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
 
         var indexBuffers: [IndexBuffer] = []
         for _ in 0..<Self.bufferCount {
-            let buffer = try MetalBuffer<SplatIndexType>(device: device)
+            let buffer = try MetalBuffer<ChunkedSplatIndex>(device: device)
             indexBuffers.append(IndexBuffer(buffer: buffer))
         }
 
         self.state = Mutex(State(indexBuffers: indexBuffers))
     }
 
-    // MARK: - Splat Buffer Management
+    // MARK: - Chunk Management
 
-    /// The current splat buffer. Update via `withExclusiveAccess` for thread safety.
-    /// Can be read without exclusive access, but writes must use `withExclusiveAccess`.
-    var splatBuffer: MetalBuffer<SplatRenderer.Splat>? {
-        get { state.withLock { $0.splatBuffer } }
+    /// The current chunks being sorted. Update via `withExclusiveAccess` for thread safety.
+    var chunks: [ChunkReference] {
+        get { state.withLock { $0.chunks } }
     }
 
-    /// Sets the splat buffer. Must be called within `withExclusiveAccess` for thread safety,
-    /// or during initial setup before any sorting begins.
-    func setSplatBuffer(_ buffer: MetalBuffer<SplatRenderer.Splat>?) {
+    /// Total splat count across all chunks
+    var totalSplatCount: Int {
         state.withLock { state in
-            state.splatBuffer = buffer
-            state.needsSort = buffer != nil
+            state.chunks.reduce(0) { $0 + $1.buffer.count }
+        }
+    }
+
+    /// Sets the chunks to sort. Must be called within `withExclusiveAccess` for thread safety,
+    /// or during initial setup before any sorting begins.
+    func setChunks(_ chunks: [ChunkReference]) {
+        state.withLock { state in
+            state.chunks = chunks
+            state.needsSort = !chunks.isEmpty
         }
         ensureSortLoopRunning()
     }
@@ -197,7 +190,7 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
     /// Provides scoped access to sorted index buffer. Preferred over explicit obtain/release.
     /// Suspends until a buffer is available. Does nothing if the task is cancelled.
     /// - Parameter body: Closure that receives the sorted index buffer
-    func withSortedIndices(_ body: (MetalBuffer<SplatIndexType>) throws -> Void) async rethrows {
+    func withSortedIndices(_ body: (MetalBuffer<ChunkedSplatIndex>) throws -> Void) async rethrows {
         guard let buffer = await obtainSortedIndices() else { return }
         defer { releaseSortedIndices(buffer) }
         try body(buffer)
@@ -208,7 +201,7 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
     /// Obtains a reference to the current sorted index buffer.
     /// Suspends until a buffer is available. Returns nil if the task is cancelled.
     /// Caller must call `releaseSortedIndices` when done if a buffer is returned.
-    func obtainSortedIndices() async -> MetalBuffer<SplatIndexType>? {
+    func obtainSortedIndices() async -> MetalBuffer<ChunkedSplatIndex>? {
         while !Task.isCancelled {
             if let buffer = tryObtainSortedIndices() {
                 return buffer
@@ -223,8 +216,8 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
     /// Attempts to obtain a reference to the current sorted index buffer without waiting.
     /// Returns nil immediately if no valid buffer is available.
     /// Caller must call `releaseSortedIndices` when done if a buffer is returned.
-    func tryObtainSortedIndices() -> MetalBuffer<SplatIndexType>? {
-        state.withLock { state -> MetalBuffer<SplatIndexType>? in
+    func tryObtainSortedIndices() -> MetalBuffer<ChunkedSplatIndex>? {
+        state.withLock { state -> MetalBuffer<ChunkedSplatIndex>? in
             // Don't provide buffers during exclusive access
             guard !state.hasExclusiveAccess else { return nil }
 
@@ -242,7 +235,7 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
 
     /// Releases a previously obtained index buffer reference.
     /// - Parameter buffer: The buffer returned from `obtainSortedIndices`
-    func releaseSortedIndices(_ buffer: MetalBuffer<SplatIndexType>) {
+    func releaseSortedIndices(_ buffer: MetalBuffer<ChunkedSplatIndex>) {
         state.withLock { state in
             guard let index = state.indexBuffers.firstIndex(where: { $0.buffer === buffer }) else {
                 assertionFailure("Released buffer not found in index buffers")
@@ -254,7 +247,7 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
     }
 
     /// Invalidates all index buffers synchronously.
-    /// Use this when the splat buffer contents have been reordered in place.
+    /// Use this when chunk contents have been reordered in place.
     /// Any unreleased references become stale - callers should release them promptly.
     func invalidateAllBuffers() {
         state.withLock { state in
@@ -266,18 +259,18 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
         }
     }
 
-    // MARK: - Exclusive Access for Splat Array Updates
+    // MARK: - Exclusive Access for Chunk Updates
 
-    /// Provides exclusive access to update the splat array.
+    /// Provides exclusive access to update chunks.
     /// - Parameter invalidateIndexBuffers: If true (default), waits for all buffer references to be
     ///   released and marks all buffers invalid. If false, allows existing references to continue.
     /// - Parameter body: Closure to execute with exclusive access
     func withExclusiveAccess(invalidateIndexBuffers: Bool = true,
                              _ body: () async throws -> Void) async rethrows {
-        // 1. Wait until not reading splat buffer (phase 1 of sort)
+        // 1. Wait until not reading chunks (phase 1 of sort)
         while !Task.isCancelled {
             let canProceed = state.withLock { state -> Bool in
-                if state.isReadingSplatBuffer {
+                if state.isReadingChunks {
                     return false
                 }
                 // Mark exclusive access
@@ -327,9 +320,9 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
         // 3. Execute body
         try await body()
 
-        // 4. Trigger sort if splat buffer exists
+        // 4. Trigger sort if chunks exist
         let shouldTriggerSort = state.withLock { state -> Bool in
-            state.needsSort = state.splatBuffer != nil
+            state.needsSort = !state.chunks.isEmpty
             return state.needsSort
         }
 
@@ -365,13 +358,13 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
 
         while !Task.isCancelled {
             // Check if we need to sort
-            let sortParams = state.withLock { state -> (splatBuffer: MetalBuffer<SplatRenderer.Splat>, pose: CameraPose, bufferIndex: Int)? in
+            let sortParams = state.withLock { state -> (chunks: [ChunkReference], pose: CameraPose, bufferIndex: Int)? in
                 // Don't sort during exclusive access
                 guard !state.hasExclusiveAccess else { return nil }
 
                 // Check if sort is needed
                 guard state.needsSort,
-                      let splatBuffer = state.splatBuffer,
+                      !state.chunks.isEmpty,
                       let pose = state.cameraPose else {
                     return nil
                 }
@@ -383,16 +376,16 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
 
                 // Mark that we're starting a sort
                 state.sortingBufferIndex = bufferIndex
-                state.isReadingSplatBuffer = true
+                state.isReadingChunks = true
                 state.needsSort = false
 
-                return (splatBuffer, pose, bufferIndex)
+                return (state.chunks, pose, bufferIndex)
             }
 
             guard let params = sortParams else {
                 // Nothing to sort or no buffer available, check if we should exit or wait
                 let shouldExit = state.withLock { state -> Bool in
-                    !state.needsSort && state.splatBuffer == nil
+                    !state.needsSort && state.chunks.isEmpty
                 }
 
                 if shouldExit {
@@ -405,7 +398,7 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
 
             // Perform the sort
             await performSort(
-                splatBuffer: params.splatBuffer,
+                chunks: params.chunks,
                 cameraPose: params.pose,
                 targetBufferIndex: params.bufferIndex
             )
@@ -413,40 +406,50 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
     }
 
     private func performSort(
-        splatBuffer: MetalBuffer<SplatRenderer.Splat>,
+        chunks: [ChunkReference],
         cameraPose: CameraPose,
         targetBufferIndex: Int
     ) async {
         let startTime = Date()
         onSortStart?()
 
-        let splatCount = splatBuffer.count
+        // Calculate total splat count across all chunks
+        let totalSplatCount = chunks.reduce(0) { $0 + $1.buffer.count }
         let targetBuffer = state.withLock { $0.indexBuffers[targetBufferIndex].buffer }
 
-        // Phase 1: Read splat positions and compute depths
+        // Phase 1: Read splat positions from all chunks and compute depths
         // Ensure temp storage is sized correctly
-        if sortTempStorage.count != splatCount {
-            sortTempStorage = Array(repeating: SplatIndexAndDepth(index: 0, depth: 0), count: splatCount)
+        if sortTempStorage.count != totalSplatCount {
+            sortTempStorage = Array(repeating: SplatReferenceAndDepth(chunkIndex: 0, splatIndex: 0, depth: 0), count: totalSplatCount)
         }
 
-        // Compute depth for each splat
+        // Compute depth for each splat across all chunks
+        var tempIndex = 0
         if SplatRenderer.Constants.sortByDistance {
-            for i in 0..<splatCount {
-                let splatPosition = splatBuffer.values[i].position.simd
-                sortTempStorage[i].index = SplatIndexType(i)
-                sortTempStorage[i].depth = (splatPosition - cameraPose.position).lengthSquared
+            for chunk in chunks {
+                for i in 0..<chunk.buffer.count {
+                    let position = chunk.buffer.values[i].position.simd
+                    sortTempStorage[tempIndex].chunkIndex = chunk.chunkIndex
+                    sortTempStorage[tempIndex].splatIndex = UInt32(i)
+                    sortTempStorage[tempIndex].depth = (position - cameraPose.position).lengthSquared
+                    tempIndex += 1
+                }
             }
         } else {
-            for i in 0..<splatCount {
-                let splatPosition = splatBuffer.values[i].position.simd
-                sortTempStorage[i].index = SplatIndexType(i)
-                sortTempStorage[i].depth = dot(splatPosition, cameraPose.forward)
+            for chunk in chunks {
+                for i in 0..<chunk.buffer.count {
+                    let position = chunk.buffer.values[i].position.simd
+                    sortTempStorage[tempIndex].chunkIndex = chunk.chunkIndex
+                    sortTempStorage[tempIndex].splatIndex = UInt32(i)
+                    sortTempStorage[tempIndex].depth = dot(position, cameraPose.forward)
+                    tempIndex += 1
+                }
             }
         }
 
-        // Done reading splat buffer
+        // Done reading chunks
         state.withLock { state in
-            state.isReadingSplatBuffer = false
+            state.isReadingChunks = false
         }
 
         // Phase 2: Sort by depth (back to front, so larger depth first)
@@ -454,10 +457,14 @@ class SplatSorter<SplatIndexType: BinaryInteger & Sendable>: @unchecked Sendable
 
         // Phase 3: Write sorted indices to buffer
         do {
-            try targetBuffer.ensureCapacity(splatCount)
-            targetBuffer.count = splatCount
-            for i in 0..<splatCount {
-                targetBuffer.values[i] = sortTempStorage[i].index
+            try targetBuffer.ensureCapacity(totalSplatCount)
+            targetBuffer.count = totalSplatCount
+            for i in 0..<totalSplatCount {
+                let ref = sortTempStorage[i]
+                targetBuffer.values[i] = ChunkedSplatIndex(
+                    chunkIndex: ref.chunkIndex,
+                    splatIndex: ref.splatIndex
+                )
             }
         } catch {
             // Buffer allocation failed, abort this sort
