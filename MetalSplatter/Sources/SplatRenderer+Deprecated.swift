@@ -30,7 +30,7 @@ extension SplatRenderer {
         try buffer.ensureCapacity(points.count)
         buffer.append(points.map { EncodedSplat($0) })
 
-        let chunk = SplatChunk(splats: buffer)
+        let chunk = SplatChunk(splats: buffer, shCoefficients: nil, shDegree: .sh0)
         await addChunk(chunk)
     }
 

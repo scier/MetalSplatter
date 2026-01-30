@@ -5,10 +5,10 @@ import SplatIO
 
 final class SplatIOTests: XCTestCase {
     class ContentStorage {
-        static func testApproximatelyEqual(lhs: ContentStorage, rhs: ContentStorage) {
+        static func testApproximatelyEqual(lhs: ContentStorage, rhs: ContentStorage, compareSH0Only: Bool) {
             XCTAssertEqual(lhs.points.count, rhs.points.count, "Same number of points")
             for (lhsPoint, rhsPoint) in zip(lhs.points, rhs.points) {
-                XCTAssertTrue(lhsPoint ~= rhsPoint)
+                XCTAssertTrue(lhsPoint.approximatelyEqual(to: rhsPoint, compareSH0Only: compareSH0Only))
             }
         }
 
@@ -33,31 +33,43 @@ final class SplatIOTests: XCTestCase {
         try await testRead(dotSplatURL)
     }
 
-    func testFormatsEqual() async throws {
-        try await testEqual(plyURL, dotSplatURL)
+    func testFormatsEqualSH0() async throws {
+        // PLY and .splat formats can only be compared at SH0 level since .splat doesn't support higher SH
+        try await testEqual(plyURL, dotSplatURL, compareSH0Only: true)
     }
 
-    func testRewritePLY() async throws {
-        try await testReadWriteRead(plyURL, writePLY: true)
-        try await testReadWriteRead(plyURL, writePLY: false)
+    func testRewritePLYToPLY() async throws {
+        // PLY→PLY should preserve all SH coefficients
+        try await testReadWriteRead(plyURL, writePLY: true, compareSH0Only: false)
     }
 
-    func testRewriteDotSplat() async throws {
-        try await testReadWriteRead(dotSplatURL, writePLY: true)
-        try await testReadWriteRead(dotSplatURL, writePLY: false)
+    func testRewritePLYToSplat() async throws {
+        // PLY→.splat loses higher SH coefficients, only compare SH0
+        try await testReadWriteRead(plyURL, writePLY: false, compareSH0Only: true)
     }
 
-    func testEqual(_ urlA: URL, _ urlB: URL) async throws {
+    func testRewriteDotSplatToPLY() async throws {
+        // .splat→PLY: .splat only has SH0, PLY writer adds zeros for higher SH
+        // Only compare SH0 since that's all the original had
+        try await testReadWriteRead(dotSplatURL, writePLY: true, compareSH0Only: true)
+    }
+
+    func testRewriteDotSplatToSplat() async throws {
+        // .splat→.splat should preserve SH0 exactly
+        try await testReadWriteRead(dotSplatURL, writePLY: false, compareSH0Only: false)
+    }
+
+    func testEqual(_ urlA: URL, _ urlB: URL, compareSH0Only: Bool) async throws {
         let readerA = try AutodetectSceneReader(urlA)
         let contentA = try await ContentStorage(readerA)
 
         let readerB = try AutodetectSceneReader(urlB)
         let contentB = try await ContentStorage(readerB)
 
-        ContentStorage.testApproximatelyEqual(lhs: contentA, rhs: contentB)
+        ContentStorage.testApproximatelyEqual(lhs: contentA, rhs: contentB, compareSH0Only: compareSH0Only)
     }
 
-    func testReadWriteRead(_ url: URL, writePLY: Bool) async throws {
+    func testReadWriteRead(_ url: URL, writePLY: Bool, compareSH0Only: Bool) async throws {
         let readerA = try AutodetectSceneReader(url)
         let contentA = try await ContentStorage(readerA)
 
@@ -87,7 +99,7 @@ final class SplatIOTests: XCTestCase {
         let readerB: any SplatSceneReader = writePLY ? try SplatPLYSceneReader(writtenData) : try DotSplatSceneReader(writtenData)
         let contentB = try await ContentStorage(readerB)
 
-        ContentStorage.testApproximatelyEqual(lhs: contentA, rhs: contentB)
+        ContentStorage.testApproximatelyEqual(lhs: contentA, rhs: contentB, compareSH0Only: compareSH0Only)
     }
 
     func testRead(_ url: URL) async throws {
@@ -106,18 +118,32 @@ extension SplatScenePoint {
         static let rotation: Float = 2.0 / 128
     }
 
-    public static func ~= (lhs: SplatScenePoint, rhs: SplatScenePoint) -> Bool {
-        (lhs.position - rhs.position).isWithin(tolerance: Tolerance.position) &&
-        lhs.color ~= rhs.color &&
-        lhs.opacity ~= rhs.opacity &&
-        lhs.scale ~= rhs.scale &&
-        (lhs.rotation.normalized.vector - rhs.rotation.normalized.vector).isWithin(tolerance: Tolerance.rotation)
+    func approximatelyEqual(to rhs: SplatScenePoint, compareSH0Only: Bool) -> Bool {
+        (position - rhs.position).isWithin(tolerance: Tolerance.position) &&
+        color.approximatelyEqual(to: rhs.color, compareSH0Only: compareSH0Only) &&
+        opacity ~= rhs.opacity &&
+        scale ~= rhs.scale &&
+        (rotation.normalized.vector - rhs.rotation.normalized.vector).isWithin(tolerance: Tolerance.rotation)
     }
 }
 
 extension SplatScenePoint.Color {
-    public static func ~= (lhs: SplatScenePoint.Color, rhs: SplatScenePoint.Color) -> Bool {
-        (lhs.asLinearFloat - rhs.asLinearFloat).isWithin(tolerance: SplatScenePoint.Tolerance.color)
+    func approximatelyEqual(to rhs: SplatScenePoint.Color, compareSH0Only: Bool) -> Bool {
+        if compareSH0Only {
+            // Only compare SH0 (base color)
+            return (asSRGBFloat - rhs.asSRGBFloat).isWithin(tolerance: SplatScenePoint.Tolerance.color)
+        } else {
+            // Compare all SH coefficients
+            let lhsSH = asSphericalHarmonicFloat
+            let rhsSH = rhs.asSphericalHarmonicFloat
+            guard lhsSH.count == rhsSH.count else { return false }
+            for (l, r) in zip(lhsSH, rhsSH) {
+                if !(l - r).isWithin(tolerance: SplatScenePoint.Tolerance.color) {
+                    return false
+                }
+            }
+            return true
+        }
     }
 }
 

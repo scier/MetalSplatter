@@ -27,7 +27,9 @@ vertex FragmentIn singleStageSplatVertexShader(uint vertexID [[vertex_id]],
     ChunkInfo chunk = chunkTable.chunks[idx.chunkIndex];
     Splat splat = chunk.splats[idx.splatIndex];
 
-    return splatVertex(splat, uniforms, vertexID % 4);
+    return splatVertex(splat, uniforms, vertexID % 4,
+                       chunk.shCoefficients, chunk.shDegree,
+                       idx.splatIndex);
 }
 
 fragment half4 singleStageSplatFragmentShader(FragmentIn in [[stage_in]]) {

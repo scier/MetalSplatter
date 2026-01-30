@@ -19,21 +19,17 @@ extension SplatScenePoint: CustomStringConvertible {
 extension SplatScenePoint.Color: CustomStringConvertible {
     public var description: String {
         switch self {
-        case .sphericalHarmonic(let values):
+        case .sphericalHarmonicFloat(let values):
             switch values.count {
-            case 0: "sh(nil)"
-            case 1: "sh(N=0; (\(values[0].x), \(values[0].y), \(values[0].z)))"
-            case 1+3: "sh(N=1; (\(values[0].x), \(values[0].y), \(values[0].z)), ...)"
-            case 1+3+5: "sh(N=2; (\(values[0].x), \(values[0].y), \(values[0].z)), ...)"
-            case 1+3+5+7: "sh(N=3; (\(values[0].x), \(values[0].y), \(values[0].z)), ...)"
-            default: "sh(N=?, \(values.count) triples)"
+            case 0: "shFloat(nil)"
+            case 1: "shFloat(N=0; (\(values[0].x), \(values[0].y), \(values[0].z)))"
+            case 1+3: "shFloat(N=1; (\(values[0].x), \(values[0].y), \(values[0].z)), ...)"
+            case 1+3+5: "shFloat(N=2; (\(values[0].x), \(values[0].y), \(values[0].z)), ...)"
+            case 1+3+5+7: "shFloat(N=3; (\(values[0].x), \(values[0].y), \(values[0].z)), ...)"
+            default: "shFloat(N=?, \(values.count) triples)"
             }
-        case .linearFloat(let values):
-            "linear(\(values.x), \(values.y), \(values.z))"
-        case .linearFloat256(let values):
-            "linearFloat256(\(values.x), \(values.y), \(values.z))"
-        case .linearUInt8(let values):
-            "linearByte(\(values.x), \(values.y), \(values.z))"
+        case .sRGBUInt8(let values):
+            "sRGB(\(values.x), \(values.y), \(values.z))"
         }
     }
 }

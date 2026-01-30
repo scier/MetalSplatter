@@ -1,4 +1,5 @@
 import Foundation
+import SplatIO
 
 fileprivate enum SplatChunk_sortByLocality_Constants {
     // When performing the splat locality sort, we need to use quantized positions, meaning we need to compute bounds.
@@ -8,19 +9,19 @@ fileprivate enum SplatChunk_sortByLocality_Constants {
 }
 
 extension SplatChunk {
-    /// Sorts splats by their position's Morton code to improve memory locality: adjacent splats in memory will tend to be
+    /// Sorts splats (and SH coefficients) by their position's Morton code to improve memory locality: adjacent splats in memory will tend to be
     /// nearby in space as well. This helps improve the tiling/cache performance of the vertex shader.
     func sortByLocality() {
         let splatBuffer = splats
         guard splatBuffer.count > 3 else { return }
-        
+
         let (minBounds, maxBounds) = splatBuffer.bounds(withinSigmaMultiple: SplatChunk_sortByLocality_Constants.boundsStdDeviationsForLocalitySort)
         let boundsSize = maxBounds - minBounds
         guard boundsSize.x > 0 && boundsSize.y > 0 && boundsSize.z > 0 else {
             return
         }
         let invBoundsSize = 1/boundsSize
-        
+
         // Quantize a value into a 10-bit unsigned integer
         func quantize(_ value: Float, _ minBounds: Float, _ invBoundsSize: Float) -> UInt32 {
             let normalizedValue = (value - minBounds) * invBoundsSize
@@ -33,7 +34,7 @@ extension SplatChunk {
                           quantize(p.y, minBounds.y, invBoundsSize.y),
                           quantize(p.z, minBounds.z, invBoundsSize.z))
         }
-        
+
         // Encode quantized coordinate into a single Morton code
         func morton3D(_ p: SIMD3<UInt32>) -> UInt32 {
             var result: UInt32 = 0
@@ -44,7 +45,7 @@ extension SplatChunk {
             }
             return result
         }
-        
+
         // Create array of (index, morton code) pairs
         let indicesWithMortonCodes: [(Int, UInt32)] = (0..<splatBuffer.count).map { i in
             let position = splatBuffer.values[i].position
@@ -52,11 +53,17 @@ extension SplatChunk {
             let morton = morton3D(quantize(simdPosition))
             return (i, morton)
         }
-        
+
         // Sort indices by their Morton code
         let sorted = indicesWithMortonCodes.sorted { $0.1 < $1.1 }.map(\.0)
         // Reorder splat buffer according to sorted indices
         splatBuffer.values.reorderInPlace(fromSourceIndices: sorted)
+
+        // Also reorder SH coefficients buffer to maintain correspondence with splats
+        if let shBuffer = shCoefficients, shDegree > .sh0 {
+            let coeffsPerSplat = shDegree.extraCoefficientCount * 3  // RGB per coefficient
+            shBuffer.values.reorderGroupsInPlace(fromSourceIndices: sorted, groupSize: coeffsPerSplat)
+        }
     }
 }
 
@@ -75,10 +82,10 @@ fileprivate extension MetalBuffer where T == EncodedSplat {
         let mean = sum / count
         let variance = sumOfSquares / count - mean * mean
         let sigma = SIMD3<Float>(x: sqrt(variance.x), y: sqrt(variance.y), z: sqrt(variance.z))
-        
+
         let minBounds = mean - sigmaMultiple * sigma
         let maxBounds = mean + sigmaMultiple * sigma
-        
+
         return (min: minBounds, max: maxBounds)
     }
 }

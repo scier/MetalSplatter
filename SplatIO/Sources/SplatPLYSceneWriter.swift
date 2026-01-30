@@ -162,18 +162,28 @@ fileprivate extension PLYElement {
         appendProperty(1)
 
         // Color
-        let color = point.color.asSphericalHarmonic
+        let color = point.color.asSphericalHarmonicFloat
         let directColor = color.first ?? .zero
         appendProperty(directColor.x)
         appendProperty(directColor.y)
         appendProperty(directColor.z)
 
+        // PLY format stores SH coefficients channel-by-channel: all R, then all G, then all B.
+        // Our internal format is RGB-interleaved, so we need to deinterleave on write.
         for i in 0..<mapping.indirectColorCount {
             let shColorIndex = (1 + i)
             let shColor = shColorIndex >= color.count ? .zero : color[shColorIndex]
-            appendProperty(shColor.x)
-            appendProperty(shColor.y)
-            appendProperty(shColor.z)
+            appendProperty(shColor.x)  // R channel
+        }
+        for i in 0..<mapping.indirectColorCount {
+            let shColorIndex = (1 + i)
+            let shColor = shColorIndex >= color.count ? .zero : color[shColorIndex]
+            appendProperty(shColor.y)  // G channel
+        }
+        for i in 0..<mapping.indirectColorCount {
+            let shColorIndex = (1 + i)
+            let shColor = shColorIndex >= color.count ? .zero : color[shColorIndex]
+            appendProperty(shColor.z)  // B channel
         }
 
         // Opacity

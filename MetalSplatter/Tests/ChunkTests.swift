@@ -77,9 +77,10 @@ final class ChunkTests: XCTestCase {
 
     func makeSplat(at position: SIMD3<Float>) -> EncodedSplat {
         EncodedSplat(position: position,
-                            color: SIMD4<Float>(1, 1, 1, 1),
-                            scale: SIMD3<Float>(0.1, 0.1, 0.1),
-                            rotation: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1))
+                     colorSH0: SIMD3<Float>(1, 1, 1),
+                     opacity: 1.0,
+                     scale: SIMD3<Float>(0.1, 0.1, 0.1),
+                     rotation: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1))
     }
 }
 
@@ -116,9 +117,10 @@ final class SplatRendererChunkTests: XCTestCase {
 
     func makeSplat(at position: SIMD3<Float>) -> EncodedSplat {
         EncodedSplat(position: position,
-                            color: SIMD4<Float>(1, 1, 1, 1),
-                            scale: SIMD3<Float>(0.1, 0.1, 0.1),
-                            rotation: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1))
+                     colorSH0: SIMD3<Float>(1, 1, 1),
+                     opacity: 1.0,
+                     scale: SIMD3<Float>(0.1, 0.1, 0.1),
+                     rotation: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1))
     }
 
     // MARK: - Basic Chunk Management Tests

@@ -56,7 +56,9 @@ public final class SplatRenderer: @unchecked Sendable {
     struct Uniforms {
         var projectionMatrix: matrix_float4x4
         var viewMatrix: matrix_float4x4
-        var screenSize: SIMD2<UInt32> // Size of screen in pixels
+        var cameraPosition: MTLPackedFloat3   // World-space camera position for SH evaluation
+        var _padding0: UInt32 = 0             // Padding for alignment
+        var screenSize: SIMD2<UInt32>         // Size of screen in pixels
 
         var splatCount: UInt32
         var indexedSplatCount: UInt32
@@ -90,11 +92,13 @@ public final class SplatRenderer: @unchecked Sendable {
     }
 
     // Keep in sync with Shaders.metal : ChunkInfo
-    // Expected layout: pointer (8 bytes), splatCount (4 bytes), padding (4 bytes) = 16 bytes
+    // Expected layout: splatsPointer (8), shCoefficientsPointer (8), splatCount (4), shDegree (1), padding (3) = 24 bytes
     struct GPUChunkInfo {
-        var splatsPointer: UInt64  // device pointer
+        var splatsPointer: UInt64             // device pointer to splats
+        var shCoefficientsPointer: UInt64     // device pointer to SH coefficients (0 for SH0)
         var splatCount: UInt32
-        var _padding: UInt32
+        var shDegree: UInt8                   // SHDegree enum value
+        var _shPadding: (UInt8, UInt8, UInt8) = (0, 0, 0)
     }
 
     public let device: MTLDevice
@@ -561,9 +565,13 @@ public final class SplatRenderer: @unchecked Sendable {
     private func updateUniforms(forViewports viewports: [ViewportDescriptor],
                                 splatCount: UInt32,
                                 indexedSplatCount: UInt32) {
+        // Compute average camera position from all viewports
+        let cameraPos = viewports.map { Self.cameraWorldPosition(forViewMatrix: $0.viewMatrix) }.mean ?? .zero
+
         for (i, viewport) in viewports.enumerated() where i <= maxViewCount {
             let uniforms = Uniforms(projectionMatrix: viewport.projectionMatrix,
                                     viewMatrix: viewport.viewMatrix,
+                                    cameraPosition: MTLPackedFloat3Make(cameraPos.x, cameraPos.y, cameraPos.z),
                                     screenSize: SIMD2(x: UInt32(viewport.screenSize.x), y: UInt32(viewport.screenSize.y)),
                                     splatCount: splatCount,
                                     indexedSplatCount: indexedSplatCount)
@@ -621,10 +629,13 @@ public final class SplatRenderer: @unchecked Sendable {
         // Write chunk info array after header
         let chunksPtr = ptr.advanced(by: headerSize).assumingMemoryBound(to: GPUChunkInfo.self)
         for (entry, chunkIndex) in enabledChunks {
+            let shPointer = entry.chunk.shCoefficients?.buffer.gpuAddress ?? 0
+
             chunksPtr[Int(chunkIndex)] = GPUChunkInfo(
                 splatsPointer: entry.chunk.splats.buffer.gpuAddress,
+                shCoefficientsPointer: shPointer,
                 splatCount: UInt32(entry.chunk.splatCount),
-                _padding: 0
+                shDegree: entry.chunk.shDegree.rawValue
             )
         }
 
@@ -849,9 +860,13 @@ public final class SplatRenderer: @unchecked Sendable {
         renderEncoder.setVertexBuffer(chunkTableBuffer, offset: 0, index: BufferIndex.chunkTable.rawValue)
         renderEncoder.setVertexBuffer(splatIndexBuffer.buffer, offset: 0, index: BufferIndex.splatIndex.rawValue)
 
-        // Make splat buffers resident - required when accessing via GPU addresses embedded in chunk table
+        // Make splat and SH coefficient buffers resident - required when accessing via GPU addresses embedded in chunk table
         for (entry, _) in enabledChunks {
             renderEncoder.useResource(entry.chunk.splats.buffer, usage: .read, stages: .vertex)
+            // Also make SH coefficient buffer resident if present
+            if let shBuffer = entry.chunk.shCoefficients?.buffer {
+                renderEncoder.useResource(shBuffer, usage: .read, stages: .vertex)
+            }
         }
 
         renderEncoder.drawIndexedPrimitives(type: .triangle,
@@ -951,6 +966,41 @@ extension UnsafeMutablePointer {
                     break
                 } else {
                     advanced(by: current).moveUpdate(from: advanced(by: next), count: 1)
+                    current = next
+                }
+            }
+        }
+    }
+
+    /// Reorders groups of elements in place, where each group has `groupSize` consecutive elements.
+    /// sourceIndices[i] indicates which source group should end up at destination group i.
+    func reorderGroupsInPlace(fromSourceIndices sourceIndices: [Int], groupSize: Int) {
+        guard groupSize > 0 else { return }
+        let groupCount = sourceIndices.count
+        var visited = [Bool](repeating: false, count: groupCount)
+
+        // Temporary storage for one group
+        let temp = UnsafeMutablePointer<Pointee>.allocate(capacity: groupSize)
+        defer { temp.deallocate() }
+
+        for i in 0..<groupCount {
+            guard !visited[i] else { continue }
+
+            var current = i
+            // Copy source group to temp
+            temp.moveInitialize(from: advanced(by: sourceIndices[current] * groupSize), count: groupSize)
+
+            while true {
+                visited[current] = true
+                let next = sourceIndices[current]
+
+                if visited[next] {
+                    // Place temp into current position
+                    advanced(by: current * groupSize).moveInitialize(from: temp, count: groupSize)
+                    break
+                } else {
+                    // Move next group into current position
+                    advanced(by: current * groupSize).moveUpdate(from: advanced(by: next * groupSize), count: groupSize)
                     current = next
                 }
             }

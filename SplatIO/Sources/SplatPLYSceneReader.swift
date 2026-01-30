@@ -57,7 +57,7 @@ public class SplatPLYSceneReader: SplatSceneReader {
                         for element in plyStreamElementSeries.elements {
                             if points.count == pointCount {
                                 points.append(SplatScenePoint(position: .zero,
-                                                              color: .linearUInt8(.zero),
+                                                              color: .sRGBUInt8(.zero),
                                                               opacity: .linearFloat(.zero),
                                                               scale: .exponent(.zero),
                                                               rotation: .init(vector: .zero)))
@@ -83,9 +83,9 @@ public class SplatPLYSceneReader: SplatSceneReader {
 
 private struct ElementInputMapping {
     public enum Color {
-        case sphericalHarmonic([SIMD3<Int>])
-        case linearFloat256(SIMD3<Int>)
-        case linearUInt8(SIMD3<Int>)
+        case sphericalHarmonicFloat([SIMD3<Int>])
+        case sRGBFloat256(SIMD3<Int>)  // Legacy NeRF Studio format, normalized on read
+        case sRGBUInt8(SIMD3<Int>)
     }
 
     static let sphericalHarmonicsCount = 45
@@ -124,30 +124,35 @@ private struct ElementInputMapping {
                 let individualSphericalHarmonicsPropertyIndices: [Int] = try (0..<sphericalHarmonicsCount).map {
                     try headerElement.index(forFloat32PropertyNamed: [ "\(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)\($0)" ])
                 }
-                let sphericalHarmonicsPropertyIndices: [SIMD3<Int>] = stride(from: 0, to: individualSphericalHarmonicsPropertyIndices.count, by: 3).map {
-                    SIMD3<Int>(individualSphericalHarmonicsPropertyIndices[$0],
-                               individualSphericalHarmonicsPropertyIndices[$0 + 1],
-                               individualSphericalHarmonicsPropertyIndices[$0 + 2])
+                // PLY files store SH coefficients channel-by-channel (all R, then all G, then all B),
+                // but we need them RGB-interleaved. Reorganize the indices accordingly.
+                // For 45 f_rest properties: R=0-14, G=15-29, B=30-44
+                // Coefficient i maps to: (R[i], G[i], B[i]) = (i, i+15, i+30)
+                let coeffsPerChannel = individualSphericalHarmonicsPropertyIndices.count / 3
+                let sphericalHarmonicsPropertyIndices: [SIMD3<Int>] = (0..<coeffsPerChannel).map { i in
+                    SIMD3<Int>(individualSphericalHarmonicsPropertyIndices[i],
+                               individualSphericalHarmonicsPropertyIndices[i + coeffsPerChannel],
+                               individualSphericalHarmonicsPropertyIndices[i + 2 * coeffsPerChannel])
                 }
-                color = .sphericalHarmonic([primaryColorPropertyIndices] + sphericalHarmonicsPropertyIndices)
+                color = .sphericalHarmonicFloat([primaryColorPropertyIndices] + sphericalHarmonicsPropertyIndices)
             } else {
-                color = .sphericalHarmonic([primaryColorPropertyIndices])
+                color = .sphericalHarmonicFloat([primaryColorPropertyIndices])
             }
         } else if headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorR, type: .float32) &&
                     headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorG, type: .float32) &&
                     headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorB, type: .float32) {
-            // Special case for NRRFStudio SH=0 files. This may be fixed now?
+            // Special case for legacy NeRF Studio SH=0 files
             let colorRPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorR, type: .float32)
             let colorGPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorG, type: .float32)
             let colorBPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorB, type: .float32)
-            color = .linearFloat256(SIMD3(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex))
+            color = .sRGBFloat256(SIMD3(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex))
         } else if headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorR, type: .uint8) &&
                     headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorG, type: .uint8) &&
                     headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorB, type: .uint8) {
             let colorRPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorR, type: .uint8)
             let colorGPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorG, type: .uint8)
             let colorBPropertyIndex = try headerElement.index(forPropertyNamed: SplatPLYConstants.PropertyName.colorB, type: .uint8)
-            color = .linearUInt8(SIMD3(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex))
+            color = .sRGBUInt8(SIMD3(colorRPropertyIndex, colorGPropertyIndex, colorBPropertyIndex))
         } else {
             throw SplatPLYSceneReader.Error.unsupportedFileContents("No color property elements found with the expected types")
         }
@@ -185,20 +190,25 @@ private extension SplatScenePoint {
                          z: try element.float32Value(forPropertyIndex: mapping.positionZPropertyIndex))
 
         switch mapping.colorPropertyIndices {
-        case .sphericalHarmonic(let sphericalHarmonicsPropertyIndices):
-            color = .sphericalHarmonic(try sphericalHarmonicsPropertyIndices.map {
+        case .sphericalHarmonicFloat(let sphericalHarmonicsPropertyIndices):
+            color = .sphericalHarmonicFloat(try sphericalHarmonicsPropertyIndices.map {
                 try SIMD3<Float>(x: element.float32Value(forPropertyIndex: $0.x),
                                  y: element.float32Value(forPropertyIndex: $0.y),
                                  z: element.float32Value(forPropertyIndex: $0.z))
             })
-        case .linearFloat256(let propertyIndices):
-            color = .linearFloat256(SIMD3(try element.float32Value(forPropertyIndex: propertyIndices.x),
-                                          try element.float32Value(forPropertyIndex: propertyIndices.y),
-                                          try element.float32Value(forPropertyIndex: propertyIndices.z)))
-        case .linearUInt8(let propertyIndices):
-            color = .linearUInt8(SIMD3(try element.uint8Value(forPropertyIndex: propertyIndices.x),
-                                       try element.uint8Value(forPropertyIndex: propertyIndices.y),
-                                       try element.uint8Value(forPropertyIndex: propertyIndices.z)))
+        case .sRGBFloat256(let propertyIndices):
+            // Legacy NeRF Studio format: normalize 0-256 float range to 0-255 uint8
+            let floatValues = SIMD3<Float>(try element.float32Value(forPropertyIndex: propertyIndices.x),
+                                           try element.float32Value(forPropertyIndex: propertyIndices.y),
+                                           try element.float32Value(forPropertyIndex: propertyIndices.z))
+            let scaled = floatValues / 256.0 * 255.0
+            color = .sRGBUInt8(SIMD3<UInt8>(UInt8(scaled.x.clamped(to: 0...255)),
+                                            UInt8(scaled.y.clamped(to: 0...255)),
+                                            UInt8(scaled.z.clamped(to: 0...255))))
+        case .sRGBUInt8(let propertyIndices):
+            color = .sRGBUInt8(SIMD3(try element.uint8Value(forPropertyIndex: propertyIndices.x),
+                                     try element.uint8Value(forPropertyIndex: propertyIndices.y),
+                                     try element.uint8Value(forPropertyIndex: propertyIndices.z)))
         }
 
         scale =
