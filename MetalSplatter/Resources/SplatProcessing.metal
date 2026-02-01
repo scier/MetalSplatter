@@ -79,20 +79,17 @@ float3 calcCovariance2D(float3 viewPos,
                         packed_half3 cov3Da,
                         packed_half3 cov3Db,
                         float4x4 viewMatrix,
-                        float4x4 projectionMatrix,
-                        uint2 screenSize) {
+                        float focalX,
+                        float focalY,
+                        float tanHalfFovX,
+                        float tanHalfFovY) {
     float invViewPosZ = 1 / viewPos.z;
     float invViewPosZSquared = invViewPosZ * invViewPosZ;
 
-    float tanHalfFovX = 1 / projectionMatrix[0][0];
-    float tanHalfFovY = 1 / projectionMatrix[1][1];
-    float limX = 1.3 * tanHalfFovX;
-    float limY = 1.3 * tanHalfFovY;
+    float limX = 1.3f * tanHalfFovX;
+    float limY = 1.3f * tanHalfFovY;
     viewPos.x = clamp(viewPos.x * invViewPosZ, -limX, limX) * viewPos.z;
     viewPos.y = clamp(viewPos.y * invViewPosZ, -limY, limY) * viewPos.z;
-
-    float focalX = screenSize.x * projectionMatrix[0][0] / 2;
-    float focalY = screenSize.y * projectionMatrix[1][1] / 2;
 
     float3x3 J = float3x3(
         focalX * invViewPosZ, 0, 0,
@@ -170,7 +167,9 @@ FragmentIn splatVertex(Splat splat,
     }
 
     float3 cov2D = calcCovariance2D(viewPosition3, splat.covA, splat.covB,
-                                    uniforms.viewMatrix, uniforms.projectionMatrix, uniforms.screenSize);
+                                    uniforms.viewMatrix,
+                                    uniforms.focalX, uniforms.focalY,
+                                    uniforms.tanHalfFovX, uniforms.tanHalfFovY);
 
     float2 axis1;
     float2 axis2;

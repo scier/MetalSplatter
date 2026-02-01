@@ -50,6 +50,12 @@ typedef struct
     uint _padding0;                // Padding for alignment
     uint2 screenSize;
 
+    // Precomputed values for covariance projection (derived from projectionMatrix and screenSize)
+    float focalX;                  // screenSize.x * projectionMatrix[0][0] / 2
+    float focalY;                  // screenSize.y * projectionMatrix[1][1] / 2
+    float tanHalfFovX;             // 1 / projectionMatrix[0][0]
+    float tanHalfFovY;             // 1 / projectionMatrix[1][1]
+
     /*
      The first N splats are represented as 2N primitives and 4N vertex indices. The remainder are represented
      as instances of these first N. This allows us to limit the size of the indexed array (and associated memory),

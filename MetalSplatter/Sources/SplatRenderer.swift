@@ -60,6 +60,12 @@ public final class SplatRenderer: @unchecked Sendable {
         var _padding0: UInt32 = 0             // Padding for alignment
         var screenSize: SIMD2<UInt32>         // Size of screen in pixels
 
+        // Precomputed values for covariance projection (derived from projectionMatrix and screenSize)
+        var focalX: Float                     // screenSize.x * projectionMatrix[0][0] / 2
+        var focalY: Float                     // screenSize.y * projectionMatrix[1][1] / 2
+        var tanHalfFovX: Float                // 1 / projectionMatrix[0][0]
+        var tanHalfFovY: Float                // 1 / projectionMatrix[1][1]
+
         var splatCount: UInt32
         var indexedSplatCount: UInt32
     }
@@ -569,10 +575,22 @@ public final class SplatRenderer: @unchecked Sendable {
         let cameraPos = viewports.map { Self.cameraWorldPosition(forViewMatrix: $0.viewMatrix) }.mean ?? .zero
 
         for (i, viewport) in viewports.enumerated() where i <= maxViewCount {
+            // Precompute values for covariance projection
+            let proj00 = viewport.projectionMatrix[0][0]
+            let proj11 = viewport.projectionMatrix[1][1]
+            let focalX = Float(viewport.screenSize.x) * proj00 / 2
+            let focalY = Float(viewport.screenSize.y) * proj11 / 2
+            let tanHalfFovX = 1 / proj00
+            let tanHalfFovY = 1 / proj11
+
             let uniforms = Uniforms(projectionMatrix: viewport.projectionMatrix,
                                     viewMatrix: viewport.viewMatrix,
                                     cameraPosition: MTLPackedFloat3Make(cameraPos.x, cameraPos.y, cameraPos.z),
                                     screenSize: SIMD2(x: UInt32(viewport.screenSize.x), y: UInt32(viewport.screenSize.y)),
+                                    focalX: focalX,
+                                    focalY: focalY,
+                                    tanHalfFovX: tanHalfFovX,
+                                    tanHalfFovY: tanHalfFovY,
                                     splatCount: splatCount,
                                     indexedSplatCount: indexedSplatCount)
             renderState.uniforms.pointee.setUniforms(index: i, uniforms)
