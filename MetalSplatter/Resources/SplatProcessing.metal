@@ -156,6 +156,13 @@ FragmentIn splatVertex(Splat splat,
     float4 viewPosition4 = uniforms.viewMatrix * float4(splat.position, 1);
     float3 viewPosition3 = viewPosition4.xyz;
 
+    // Early cull: skip splats behind or at the camera plane
+    // (In view space, camera looks down -z, so z >= 0 means behind camera)
+    if (viewPosition3.z >= 0) {
+        out.position = float4(1, 1, 0, 1);
+        return out;
+    }
+
     half3 srgbColor;
     if (shDegree == SHDegree0) {
         // Fast path for SH0
