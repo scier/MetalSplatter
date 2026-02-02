@@ -32,7 +32,7 @@ public class SPZSceneReader: SplatSceneReader {
         self.source = .data(data)
     }
 
-    public func read() throws -> AsyncThrowingStream<[SplatScenePoint], Swift.Error> {
+    public func read() throws -> AsyncThrowingStream<[SplatPoint], Swift.Error> {
         // Load the packed SPZ data (decompressed but not unpacked)
         let packed: PackedGaussians
         do {
@@ -57,12 +57,12 @@ public class SPZSceneReader: SplatSceneReader {
             var offset = 0
             while offset < numPoints {
                 let end = min(offset + Constants.batchSize, numPoints)
-                var batch = [SplatScenePoint]()
+                var batch = [SplatPoint]()
                 batch.reserveCapacity(end - offset)
 
                 for i in offset..<end {
                     let unpacked = packed.unpack(Int32(i), converter: converter)
-                    let point = self.convertUnpackedToSplatScenePoint(unpacked, shDegree: shDegree)
+                    let point = self.convertUnpackedToSplatPoint(unpacked, shDegree: shDegree)
                     batch.append(point)
                 }
 
@@ -73,8 +73,8 @@ public class SPZSceneReader: SplatSceneReader {
         }
     }
 
-    /// Convert an UnpackedGaussian to a SplatScenePoint.
-    private func convertUnpackedToSplatScenePoint(_ unpacked: UnpackedGaussian, shDegree: Int32) -> SplatScenePoint {
+    /// Convert an UnpackedGaussian to a SplatPoint.
+    private func convertUnpackedToSplatPoint(_ unpacked: UnpackedGaussian, shDegree: Int32) -> SplatPoint {
         // Position
         let position = unpacked.position
 
@@ -93,13 +93,13 @@ public class SPZSceneReader: SplatSceneReader {
             shCoeffs.append(coeff)
         }
 
-        let color = SplatScenePoint.Color.sphericalHarmonicFloat(shCoeffs)
+        let color = SplatPoint.Color.sphericalHarmonicFloat(shCoeffs)
 
         // Opacity (stored as logit in SPZ)
-        let opacity = SplatScenePoint.Opacity.logitFloat(unpacked.alpha)
+        let opacity = SplatPoint.Opacity.logitFloat(unpacked.alpha)
 
         // Scale (stored as log/exponent in SPZ)
-        let scale = SplatScenePoint.Scale.exponent(unpacked.scale)
+        let scale = SplatPoint.Scale.exponent(unpacked.scale)
 
         // Rotation: UnpackedGaussian stores as [x, y, z, w]
         let rotation = simd_quatf(
@@ -109,7 +109,7 @@ public class SPZSceneReader: SplatSceneReader {
             r: unpacked.rotation.w
         )
 
-        return SplatScenePoint(
+        return SplatPoint(
             position: position,
             color: color,
             opacity: opacity,

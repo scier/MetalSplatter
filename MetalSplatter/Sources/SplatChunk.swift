@@ -18,7 +18,7 @@ public struct ChunkID: Hashable, Sendable, Equatable {
 /// Created externally and added to a SplatRenderer via `addChunk(_:)`.
 public struct SplatChunk: @unchecked Sendable {
     /// The splat data buffer
-    public let splats: MetalBuffer<EncodedSplat>
+    public let splats: MetalBuffer<EncodedSplatPoint>
 
     /// Optional buffer containing higher-order spherical harmonics coefficients.
     /// This is nil for SH degree 0 (view-independent color).
@@ -39,7 +39,7 @@ public struct SplatChunk: @unchecked Sendable {
     ///   - splats: The Metal buffer containing splat data (with raw SH0 in color field)
     ///   - shCoefficients: Optional buffer with higher-order SH coefficients (nil for SH0)
     ///   - shDegree: The spherical harmonics degree for this chunk
-    public init(splats: MetalBuffer<EncodedSplat>,
+    public init(splats: MetalBuffer<EncodedSplatPoint>,
                 shCoefficients: MetalBuffer<Float16>? = nil,
                 shDegree: SHDegree = .sh0) {
         self.splats = splats
@@ -52,16 +52,16 @@ public struct SplatChunk: @unchecked Sendable {
     ///   - device: Metal device for buffer allocation
     ///   - points: Array of scene points with SH data
     public init(device: MTLDevice,
-                from points: [SplatScenePoint]) throws {
+                from points: [SplatPoint]) throws {
         // Determine the SH degree from the data
         let shDegree = points.first?.color.shDegree ?? .sh0
 
         // Create splat buffer - always stores raw SH0 coefficients
-        let splatBuffer = try MetalBuffer<EncodedSplat>(device: device, capacity: points.count)
+        let splatBuffer = try MetalBuffer<EncodedSplatPoint>(device: device, capacity: points.count)
         splatBuffer.count = points.count
 
         for (i, point) in points.enumerated() {
-            splatBuffer.values[i] = EncodedSplat(point)
+            splatBuffer.values[i] = EncodedSplatPoint(point)
         }
 
         // Create SH coefficient buffer if we have higher-order SH

@@ -55,8 +55,8 @@ extension DotSplatEncodedPoint {
 }
 
 extension DotSplatEncodedPoint {
-    var splatScenePoint: SplatScenePoint {
-        SplatScenePoint(position: position,
+    var splatPoint: SplatPoint {
+        SplatPoint(position: position,
                         color: .sRGBUInt8(color.xyz),
                         opacity: .linearUInt8(color.w),
                         scale: .linearFloat(scales),
@@ -66,13 +66,13 @@ extension DotSplatEncodedPoint {
                                              r: Float(rot[0]) - 128).normalized)
     }
 
-    init(_ splatScenePoint: SplatScenePoint) {
-        self.position = splatScenePoint.position
-        let color = splatScenePoint.color.asSRGBUInt8
-        let opacity = splatScenePoint.opacity.asLinearUInt8
+    init(_ splatPoint: SplatPoint) {
+        self.position = splatPoint.position
+        let color = splatPoint.color.asSRGBUInt8
+        let opacity = splatPoint.opacity.asLinearUInt8
         self.color = .init(x: color.x, y: color.y, z: color.z, w: opacity)
-        self.scales = splatScenePoint.scale.asLinearFloat
-        let rotation = splatScenePoint.rotation.normalized
+        self.scales = splatPoint.scale.asLinearFloat
+        let rotation = splatPoint.rotation.normalized
         self.rot = .init(
             x: UInt8((rotation.real   * 128 + 128).clamped(to: 0...255)),
             y: UInt8((rotation.imag.x * 128 + 128).clamped(to: 0...255)),

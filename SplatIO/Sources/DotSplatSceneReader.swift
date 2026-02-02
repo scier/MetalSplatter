@@ -27,7 +27,7 @@ public class DotSplatSceneReader: SplatSceneReader {
         self.source = .memory(data)
     }
 
-    public func read() throws -> AsyncThrowingStream<[SplatScenePoint], Swift.Error> {
+    public func read() throws -> AsyncThrowingStream<[SplatPoint], Swift.Error> {
         let byteStream = AsyncBufferingInputStream(try source.inputStream(),
                                                    bufferSize: Constants.bodyBufferLen)
 
@@ -43,14 +43,14 @@ public class DotSplatSceneReader: SplatSceneReader {
                         guard fullPointsCount > 0 else { continue }
 
                         let pointsCountBytes = fullPointsCount * DotSplatEncodedPoint.byteWidth
-                        var splatPoints = [SplatScenePoint]()
+                        var splatPoints = [SplatPoint]()
                         splatPoints.reserveCapacity(fullPointsCount)
 
                         for i in 0..<fullPointsCount {
                             let encodedPoint = DotSplatEncodedPoint(buffer,
                                                                     from: startIndex + i * DotSplatEncodedPoint.byteWidth,
                                                                     bigEndian: false)
-                            splatPoints.append(encodedPoint.splatScenePoint)
+                            splatPoints.append(encodedPoint.splatPoint)
                         }
 
                         continuation.yield(splatPoints)

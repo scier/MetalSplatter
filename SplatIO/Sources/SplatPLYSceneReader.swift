@@ -36,7 +36,7 @@ public class SplatPLYSceneReader: SplatSceneReader {
         self.source = .memory(data)
     }
 
-    public func read() async throws -> AsyncThrowingStream<[SplatScenePoint], Swift.Error> {
+    public func read() async throws -> AsyncThrowingStream<[SplatPoint], Swift.Error> {
         let (header, plyStream) = try await PLYReader(source).read()
 
         let elementMapping = try ElementInputMapping.elementMapping(for: header)
@@ -44,7 +44,7 @@ public class SplatPLYSceneReader: SplatSceneReader {
         // TODO SCIER: report expected point count
         return AsyncThrowingStream { continuation in
             Task {
-                var points = [SplatScenePoint]()
+                var points = [SplatPoint]()
 
                 for try await plyStreamElementSeries in plyStream {
                     var pointCount = 0
@@ -56,7 +56,7 @@ public class SplatPLYSceneReader: SplatSceneReader {
                     do {
                         for element in plyStreamElementSeries.elements {
                             if points.count == pointCount {
-                                points.append(SplatScenePoint(position: .zero,
+                                points.append(SplatPoint(position: .zero,
                                                               color: .sRGBUInt8(.zero),
                                                               opacity: .linearFloat(.zero),
                                                               scale: .exponent(.zero),
@@ -183,7 +183,7 @@ private struct ElementInputMapping {
     }
 }
 
-private extension SplatScenePoint {
+private extension SplatPoint {
     mutating func apply(_ mapping: ElementInputMapping, from element: PLYElement) throws {
         position = SIMD3(x: try element.float32Value(forPropertyIndex: mapping.positionXPropertyIndex),
                          y: try element.float32Value(forPropertyIndex: mapping.positionYPropertyIndex),

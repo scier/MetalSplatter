@@ -70,7 +70,7 @@ typedef struct
     Uniforms uniforms[kMaxViewCount];
 } UniformsArray;
 
-// Keep in sync with EncodedSplat
+// Keep in sync with EncodedSplatPoint
 typedef struct
 {
     packed_float3 position;

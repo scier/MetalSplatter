@@ -62,7 +62,7 @@ public class SplatPLYSceneWriter: SplatSceneWriter {
         self.elementMapping = elementMapping
     }
 
-    public func write(_ points: [SplatScenePoint]) async throws {
+    public func write(_ points: [SplatPoint]) async throws {
         guard let elementMapping else {
             throw Error.notStarted
         }
@@ -139,7 +139,7 @@ private struct ElementOutputMapping {
 }
 
 fileprivate extension PLYElement {
-    mutating func set(to point: SplatScenePoint, with mapping: ElementOutputMapping) {
+    mutating func set(to point: SplatPoint, with mapping: ElementOutputMapping) {
         var propertyCount = 0
 
         func appendProperty(_ value: Float) {

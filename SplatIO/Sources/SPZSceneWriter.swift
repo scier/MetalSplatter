@@ -48,7 +48,7 @@ public class SPZSceneWriter: SplatSceneWriter {
 
     /// Initialize the writer with the expected number of points.
     ///
-    /// This pre-allocates internal arrays to avoid accumulating `SplatScenePoint` objects.
+    /// This pre-allocates internal arrays to avoid accumulating `SplatPoint` objects.
     /// Must be called before `write()`.
     ///
     /// The spherical harmonics degree is auto-detected from the points written and upgraded
@@ -86,7 +86,7 @@ public class SPZSceneWriter: SplatSceneWriter {
     /// in `start()`, it will be auto-detected and upgraded as needed based on the points written.
     ///
     /// - Parameter points: Points to write.
-    public func write(_ points: [SplatScenePoint]) async throws {
+    public func write(_ points: [SplatPoint]) async throws {
         guard !closed else {
             throw Error.cannotWriteAfterClose
         }

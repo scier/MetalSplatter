@@ -45,7 +45,7 @@ public class DotSplatSceneWriter: SplatSceneWriter {
         }
     }
 
-    public func write(_ points: [SplatScenePoint]) async throws {
+    public func write(_ points: [SplatPoint]) async throws {
         guard let buffer else {
             throw Error.cannotWriteAfterClose
         }

@@ -11,7 +11,7 @@ public class AutodetectSceneReader: SplatSceneReader {
         self.url = url
     }
 
-    public func read() async throws -> AsyncThrowingStream<[SplatScenePoint], Swift.Error> {
+    public func read() async throws -> AsyncThrowingStream<[SplatPoint], Swift.Error> {
         let reader: SplatSceneReader =
         switch SplatFileFormat(for: url) {
         case .ply: try SplatPLYSceneReader(url)

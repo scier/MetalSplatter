@@ -7,8 +7,8 @@ final class SplatSorterTests: XCTestCase {
     var device: MTLDevice!
 
     /// Helper to create a test splat at a given position
-    func makeSplat(at position: SIMD3<Float>) -> EncodedSplat {
-        EncodedSplat(position: position,
+    func makeSplat(at position: SIMD3<Float>) -> EncodedSplatPoint {
+        EncodedSplatPoint(position: position,
                      colorSH0: SIMD3<Float>(1, 1, 1),
                      opacity: 1.0,
                      scale: SIMD3<Float>(0.1, 0.1, 0.1),
@@ -16,8 +16,8 @@ final class SplatSorterTests: XCTestCase {
     }
 
     /// Helper to create a splat buffer with test data
-    func makeSplatBuffer(positions: [SIMD3<Float>]) throws -> MetalBuffer<EncodedSplat> {
-        let buffer = try MetalBuffer<EncodedSplat>(device: device)
+    func makeSplatBuffer(positions: [SIMD3<Float>]) throws -> MetalBuffer<EncodedSplatPoint> {
+        let buffer = try MetalBuffer<EncodedSplatPoint>(device: device)
         try buffer.ensureCapacity(positions.count)
         for position in positions {
             buffer.append(makeSplat(at: position))
@@ -329,7 +329,7 @@ final class SplatSorterTests: XCTestCase {
 
     func testEmptyChunks() async throws {
         let sorter = try SplatSorter(device: device)
-        let emptyBuffer = try MetalBuffer<EncodedSplat>(device: device)
+        let emptyBuffer = try MetalBuffer<EncodedSplatPoint>(device: device)
         let chunk = SplatSorter.ChunkReference(chunkIndex: 0, buffer: emptyBuffer)
 
         sorter.setChunks([chunk])

@@ -6,7 +6,7 @@ import spz
 
 final class SplatIOTests: XCTestCase {
     class ContentStorage {
-        static func testApproximatelyEqual(lhs: ContentStorage, rhs: ContentStorage, compareSH0Only: Bool, tolerance: SplatScenePointTolerance = .default) {
+        static func testApproximatelyEqual(lhs: ContentStorage, rhs: ContentStorage, compareSH0Only: Bool, tolerance: SplatPointTolerance = .default) {
             XCTAssertEqual(lhs.points.count, rhs.points.count, "Same number of points")
             for (i, (lhsPoint, rhsPoint)) in zip(lhs.points, rhs.points).enumerated() {
                 XCTAssertTrue(lhsPoint.approximatelyEqual(to: rhsPoint, compareSH0Only: compareSH0Only, tolerance: tolerance),
@@ -14,7 +14,7 @@ final class SplatIOTests: XCTestCase {
             }
         }
 
-        var points: [SplatIO.SplatScenePoint] = []
+        var points: [SplatIO.SplatPoint] = []
         var batchCount: Int = 0
 
         init(_ reader: any SplatSceneReader) async throws {
@@ -116,9 +116,9 @@ final class SplatIOTests: XCTestCase {
         let numPoints = batchSize * 3 + 500  // Should produce 4 batches
 
         // Create synthetic points
-        var points = [SplatScenePoint]()
+        var points = [SplatPoint]()
         for i in 0..<numPoints {
-            let point = SplatScenePoint(
+            let point = SplatPoint(
                 position: SIMD3<Float>(Float(i), Float(i) * 0.5, Float(i) * 0.25),
                 color: .sphericalHarmonicFloat([SIMD3<Float>(0.5, 0.5, 0.5)]),
                 opacity: .linearFloat(0.9),
@@ -171,9 +171,9 @@ final class SplatIOTests: XCTestCase {
         let numPoints = 100
 
         // Create synthetic points
-        var allPoints = [SplatScenePoint]()
+        var allPoints = [SplatPoint]()
         for i in 0..<numPoints {
-            let point = SplatScenePoint(
+            let point = SplatPoint(
                 position: SIMD3<Float>(Float(i), Float(i) * 0.5, Float(i) * 0.25),
                 color: .sphericalHarmonicFloat([SIMD3<Float>(0.5, 0.5, 0.5)]),
                 opacity: .linearFloat(0.9),
@@ -275,7 +275,7 @@ final class SplatIOTests: XCTestCase {
         let spzWriter = try SPZSceneWriter(to: .memory)
         try await spzWriter.start(numPoints: 2)
 
-        let point = SplatScenePoint(
+        let point = SplatPoint(
             position: SIMD3<Float>(0, 0, 0),
             color: .sphericalHarmonicFloat([SIMD3<Float>(0.5, 0.5, 0.5)]),
             opacity: .linearFloat(0.9),
@@ -298,7 +298,7 @@ final class SplatIOTests: XCTestCase {
         }
     }
 
-    func testEqual(_ urlA: URL, _ urlB: URL, compareSH0Only: Bool, tolerance: SplatScenePointTolerance = .default) async throws {
+    func testEqual(_ urlA: URL, _ urlB: URL, compareSH0Only: Bool, tolerance: SplatPointTolerance = .default) async throws {
         let readerA = try AutodetectSceneReader(urlA)
         let contentA = try await ContentStorage(readerA)
 
@@ -370,15 +370,15 @@ final class SplatIOTests: XCTestCase {
     }
 }
 
-/// Tolerance values for comparing SplatScenePoints
-struct SplatScenePointTolerance {
+/// Tolerance values for comparing SplatPoints
+struct SplatPointTolerance {
     var position: Float
     var color: Float
     var opacity: Float
     var scale: Float
     var rotation: Float
 
-    static let `default` = SplatScenePointTolerance(
+    static let `default` = SplatPointTolerance(
         position: 1e-10,
         color: 1.0 / 256,
         opacity: 1.0 / 256,
@@ -387,7 +387,7 @@ struct SplatScenePointTolerance {
     )
 
     /// Relaxed tolerance for SPZ quantization loss
-    static let spzQuantization = SplatScenePointTolerance(
+    static let spzQuantization = SplatPointTolerance(
         position: 0.01,      // 24-bit fixed point has limited precision
         color: 0.02,         // 8-bit quantized color
         opacity: 0.02,       // 8-bit quantized alpha
@@ -396,7 +396,7 @@ struct SplatScenePointTolerance {
     )
 }
 
-extension SplatScenePoint {
+extension SplatPoint {
     enum Tolerance {
         static let position: Float = 1e-10
         static let color: Float = 1.0 / 256
@@ -405,7 +405,7 @@ extension SplatScenePoint {
         static let rotation: Float = 2.0 / 128
     }
 
-    func approximatelyEqual(to rhs: SplatScenePoint, compareSH0Only: Bool, tolerance: SplatScenePointTolerance = .default) -> Bool {
+    func approximatelyEqual(to rhs: SplatPoint, compareSH0Only: Bool, tolerance: SplatPointTolerance = .default) -> Bool {
         (position - rhs.position).isWithin(tolerance: tolerance.position) &&
         color.approximatelyEqual(to: rhs.color, compareSH0Only: compareSH0Only, tolerance: tolerance.color) &&
         opacity.approximatelyEqual(to: rhs.opacity, tolerance: tolerance.opacity) &&
@@ -414,8 +414,8 @@ extension SplatScenePoint {
     }
 }
 
-extension SplatScenePoint.Color {
-    func approximatelyEqual(to rhs: SplatScenePoint.Color, compareSH0Only: Bool, tolerance: Float = SplatScenePoint.Tolerance.color) -> Bool {
+extension SplatPoint.Color {
+    func approximatelyEqual(to rhs: SplatPoint.Color, compareSH0Only: Bool, tolerance: Float = SplatPoint.Tolerance.color) -> Bool {
         if compareSH0Only {
             // Only compare SH0 (base color)
             return (asSRGBFloat - rhs.asSRGBFloat).isWithin(tolerance: tolerance)
@@ -434,22 +434,22 @@ extension SplatScenePoint.Color {
     }
 }
 
-extension SplatScenePoint.Opacity {
-    public static func ~= (lhs: SplatScenePoint.Opacity, rhs: SplatScenePoint.Opacity) -> Bool {
-        abs(lhs.asLinearFloat - rhs.asLinearFloat) <= SplatScenePoint.Tolerance.opacity
+extension SplatPoint.Opacity {
+    public static func ~= (lhs: SplatPoint.Opacity, rhs: SplatPoint.Opacity) -> Bool {
+        abs(lhs.asLinearFloat - rhs.asLinearFloat) <= SplatPoint.Tolerance.opacity
     }
 
-    func approximatelyEqual(to rhs: SplatScenePoint.Opacity, tolerance: Float) -> Bool {
+    func approximatelyEqual(to rhs: SplatPoint.Opacity, tolerance: Float) -> Bool {
         abs(asLinearFloat - rhs.asLinearFloat) <= tolerance
     }
 }
 
-extension SplatScenePoint.Scale {
-    public static func ~= (lhs: SplatScenePoint.Scale, rhs: SplatScenePoint.Scale) -> Bool {
-        (lhs.asLinearFloat - rhs.asLinearFloat).isWithin(tolerance: SplatScenePoint.Tolerance.scale)
+extension SplatPoint.Scale {
+    public static func ~= (lhs: SplatPoint.Scale, rhs: SplatPoint.Scale) -> Bool {
+        (lhs.asLinearFloat - rhs.asLinearFloat).isWithin(tolerance: SplatPoint.Tolerance.scale)
     }
 
-    func approximatelyEqual(to rhs: SplatScenePoint.Scale, tolerance: Float) -> Bool {
+    func approximatelyEqual(to rhs: SplatPoint.Scale, tolerance: Float) -> Bool {
         (asLinearFloat - rhs.asLinearFloat).isWithin(tolerance: tolerance)
     }
 }

@@ -38,14 +38,14 @@ final class ChunkTests: XCTestCase {
     // MARK: - SplatChunk Tests
 
     func testSplatChunkCreation() throws {
-        let buffer = try MetalBuffer<EncodedSplat>(device: device)
+        let buffer = try MetalBuffer<EncodedSplatPoint>(device: device)
         let chunk = SplatChunk(splats: buffer)
 
         XCTAssertEqual(chunk.splatCount, 0)
     }
 
     func testSplatChunkSplatCount() throws {
-        let buffer = try MetalBuffer<EncodedSplat>(device: device)
+        let buffer = try MetalBuffer<EncodedSplatPoint>(device: device)
         try buffer.ensureCapacity(5)
         for i in 0..<5 {
             buffer.append(makeSplat(at: SIMD3<Float>(Float(i), 0, 0)))
@@ -75,8 +75,8 @@ final class ChunkTests: XCTestCase {
 
     // MARK: - Helper Functions
 
-    func makeSplat(at position: SIMD3<Float>) -> EncodedSplat {
-        EncodedSplat(position: position,
+    func makeSplat(at position: SIMD3<Float>) -> EncodedSplatPoint {
+        EncodedSplatPoint(position: position,
                      colorSH0: SIMD3<Float>(1, 1, 1),
                      opacity: 1.0,
                      scale: SIMD3<Float>(0.1, 0.1, 0.1),
@@ -107,7 +107,7 @@ final class SplatRendererChunkTests: XCTestCase {
     }
 
     func makeChunk(splatCount: Int) throws -> SplatChunk {
-        let buffer = try MetalBuffer<EncodedSplat>(device: device)
+        let buffer = try MetalBuffer<EncodedSplatPoint>(device: device)
         try buffer.ensureCapacity(splatCount)
         for i in 0..<splatCount {
             buffer.append(makeSplat(at: SIMD3<Float>(Float(i), 0, 0)))
@@ -115,8 +115,8 @@ final class SplatRendererChunkTests: XCTestCase {
         return SplatChunk(splats: buffer)
     }
 
-    func makeSplat(at position: SIMD3<Float>) -> EncodedSplat {
-        EncodedSplat(position: position,
+    func makeSplat(at position: SIMD3<Float>) -> EncodedSplatPoint {
+        EncodedSplatPoint(position: position,
                      colorSH0: SIMD3<Float>(1, 1, 1),
                      opacity: 1.0,
                      scale: SIMD3<Float>(0.1, 0.1, 0.1),

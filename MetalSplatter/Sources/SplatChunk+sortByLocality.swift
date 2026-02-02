@@ -67,7 +67,7 @@ extension SplatChunk {
     }
 }
 
-fileprivate extension MetalBuffer where T == EncodedSplat {
+fileprivate extension MetalBuffer where T == EncodedSplatPoint {
     // Define a bounding box which doesn't quite include all the splats, just most of them
     func bounds(withinSigmaMultiple sigmaMultiple: Float) -> (min: SIMD3<Float>, max: SIMD3<Float>) {
         var sum = SIMD3<Float>.zero

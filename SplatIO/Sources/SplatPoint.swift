@@ -40,7 +40,7 @@ public enum SHDegree: UInt8, Sendable, Comparable {
     }
 }
 
-public struct SplatScenePoint: Sendable {
+public struct SplatPoint: Sendable {
     public enum Color: Sendable {
         public static let SH_C0: Float = 0.28209479177387814
         public static let INV_SH_C0: Float = 1.0 / SH_C0
@@ -227,8 +227,8 @@ public struct SplatScenePoint: Sendable {
 
     /// Returns a normalized version with all values converted to their float representations.
     /// Color becomes sphericalHarmonicFloat with a single SH0 coefficient.
-    var normalized: SplatScenePoint {
-        SplatScenePoint(position: position,
+    var normalized: SplatPoint {
+        SplatPoint(position: position,
                         color: .sphericalHarmonicFloat([color.sh0]),
                         opacity: .linearFloat(opacity.asLinearFloat),
                         scale: .linearFloat(scale.asLinearFloat),
@@ -253,3 +253,8 @@ fileprivate extension Float {
         UInt8(clamped(to: 0.0...255.0))
     }
 }
+
+// MARK: - Deprecated
+
+@available(*, deprecated, renamed: "SplatPoint")
+public typealias SplatScenePoint = SplatPoint

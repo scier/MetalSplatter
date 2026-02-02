@@ -4,8 +4,8 @@ import SplatIO
 
 /// Deprecated convenience methods and type aliases for backwards compatibility.
 extension SplatRenderer {
-    @available(*, deprecated, renamed: "EncodedSplat")
-    public typealias Splat = EncodedSplat
+    @available(*, deprecated, renamed: "EncodedSplatPoint")
+    public typealias Splat = EncodedSplatPoint
 }
 
 /// Deprecated convenience methods for backwards compatibility.
@@ -23,11 +23,11 @@ extension SplatRenderer {
     /// Adds splat points as a new chunk.
     /// - Parameter points: The splat points to add
     /// - Note: This method creates a single chunk containing all provided splats.
-    @available(*, deprecated, message: "Use SplatChunk and addChunk(_:) instead. Create a MetalBuffer<EncodedSplat>, wrap in SplatChunk, then call addChunk.")
-    public func add(_ points: [SplatScenePoint]) async throws {
-        let buffer = try MetalBuffer<EncodedSplat>(device: device)
+    @available(*, deprecated, message: "Use SplatChunk and addChunk(_:) instead. Create a MetalBuffer<EncodedSplatPoint>, wrap in SplatChunk, then call addChunk.")
+    public func add(_ points: [SplatPoint]) async throws {
+        let buffer = try MetalBuffer<EncodedSplatPoint>(device: device)
         try buffer.ensureCapacity(points.count)
-        buffer.append(points.map { EncodedSplat($0) })
+        buffer.append(points.map { EncodedSplatPoint($0) })
 
         let chunk = SplatChunk(splats: buffer, shCoefficients: nil, shDegree: .sh0)
         await addChunk(chunk)
@@ -37,7 +37,7 @@ extension SplatRenderer {
     /// - Parameter point: The splat point to add
     /// - Note: This method creates a single chunk containing the provided splat.
     @available(*, deprecated, message: "Use SplatChunk and addChunk(_:) instead.")
-    public func add(_ point: SplatScenePoint) async throws {
+    public func add(_ point: SplatPoint) async throws {
         try await add([point])
     }
 

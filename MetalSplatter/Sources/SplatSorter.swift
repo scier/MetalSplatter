@@ -5,7 +5,7 @@ import Synchronization
 
 /**
  SplatSorter creates a sorted list of splat indices across multiple chunks. It is given a reference to
- an array of chunk buffers (each a MetalBuffer<EncodedSplat>), which may be periodically updated
+ an array of chunk buffers (each a MetalBuffer<EncodedSplatPoint>), which may be periodically updated
  using the exclusive access mechanism described below. On each frame, a renderer provides the latest camera
  pose, and then obtains a reference to the latest sorted list of chunked splat indices, which may be one or
  more frames out-of-date. After rendering is completed, it explicitly releases this reference. Between
@@ -88,7 +88,7 @@ class SplatSorter: @unchecked Sendable {
     /// Represents a chunk for sorting purposes
     struct ChunkReference {
         let chunkIndex: UInt16
-        let buffer: MetalBuffer<EncodedSplat>
+        let buffer: MetalBuffer<EncodedSplatPoint>
     }
 
     private struct IndexBuffer {

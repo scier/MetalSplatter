@@ -112,7 +112,7 @@ struct SplatConverter: AsyncParsableCommand {
         let outputLabel: String?
         var error: Swift.Error?
 
-        var points: [SplatScenePoint] = []
+        var points: [SplatPoint] = []
         var currentOffset = 0
         var readCount = 0
 
@@ -130,7 +130,7 @@ struct SplatConverter: AsyncParsableCommand {
             self.outputLabel = outputLabel
         }
 
-        func didRead(points: [SplatIO.SplatScenePoint]) {
+        func didRead(points: [SplatIO.SplatPoint]) {
             readCount += points.count
 
             let newCurrentOffset = currentOffset + points.count

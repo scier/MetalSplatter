@@ -2,7 +2,7 @@ import Foundation
 
 @available(*, deprecated, message: "Use SplatSceneReader.readAll() instead")
 public struct SplatMemoryBuffer {
-    public var points: [SplatScenePoint] = []
+    public var points: [SplatPoint] = []
 
     public init() {}
 

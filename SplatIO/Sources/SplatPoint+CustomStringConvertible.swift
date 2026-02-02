@@ -1,6 +1,6 @@
 import Foundation
 
-extension SplatScenePoint: CustomStringConvertible {
+extension SplatPoint: CustomStringConvertible {
     public var description: String {
         var components: [String] = []
 
@@ -16,7 +16,7 @@ extension SplatScenePoint: CustomStringConvertible {
     }
 }
 
-extension SplatScenePoint.Color: CustomStringConvertible {
+extension SplatPoint.Color: CustomStringConvertible {
     public var description: String {
         switch self {
         case .sphericalHarmonicFloat(let values):
@@ -34,7 +34,7 @@ extension SplatScenePoint.Color: CustomStringConvertible {
     }
 }
 
-extension SplatScenePoint.Opacity: CustomStringConvertible {
+extension SplatPoint.Opacity: CustomStringConvertible {
     public var description: String {
         switch self {
         case .logitFloat(let value):
@@ -47,7 +47,7 @@ extension SplatScenePoint.Opacity: CustomStringConvertible {
     }
 }
 
-extension SplatScenePoint.Scale: CustomStringConvertible {
+extension SplatPoint.Scale: CustomStringConvertible {
     public var description: String {
         switch self {
         case .linearFloat(let values):

@@ -22,7 +22,7 @@ struct PackedRGBHalf4 {
 }
 
 // Keep in sync with Shaders.metal : Splat
-public struct EncodedSplat {
+public struct EncodedSplatPoint {
     var position: MTLPackedFloat3
     var colorSH0: PackedRGBHalf4 // sh0 color + opacity
     var covA: PackedHalf3
@@ -31,8 +31,8 @@ public struct EncodedSplat {
 
 // MARK: - Splat Conversion
 
-extension EncodedSplat {
-    public init(_ splat: SplatScenePoint) {
+extension EncodedSplatPoint {
+    public init(_ splat: SplatPoint) {
         self.init(position: splat.position,
                   colorSH0: splat.color.sh0,
                   opacity: splat.opacity.asLinearFloat,
@@ -43,7 +43,7 @@ extension EncodedSplat {
     /// Creates a splat with explicit raw SH0 coefficients.
     /// - Parameters:
     ///   - position: World-space position
-    ///   - colorSH0: SH degree-0 coefficients (NOT sRGB color; use `SplatScenePoint.Color.sh0` to convert)
+    ///   - colorSH0: SH degree-0 coefficients (NOT sRGB color; use `SplatPoint.Color.sh0` to convert)
     ///   - opacity: Linear opacity (0-1)
     ///   - scale: Linear scale
     ///   - rotation: Rotation quaternion
@@ -60,3 +60,8 @@ extension EncodedSplat {
                   covB: PackedHalf3(x: Float16(cov3D[1, 1]), y: Float16(cov3D[1, 2]), z: Float16(cov3D[2, 2])))
     }
 }
+
+// MARK: - Deprecated
+
+@available(*, deprecated, renamed: "EncodedSplatPoint")
+public typealias EncodedSplat = EncodedSplatPoint
