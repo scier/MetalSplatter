@@ -16,9 +16,8 @@ extension SplatRenderer {
     /// - Note: This method creates a single chunk containing all splats from the file.
     @available(*, deprecated, message: "Use SplatChunk and addChunk(_:) instead. Load splats using SplatIO, create a MetalBuffer, wrap in SplatChunk, then call addChunk.")
     public func read(from url: URL) async throws {
-        var newPoints = SplatMemoryBuffer()
-        try await newPoints.read(from: try AutodetectSceneReader(url))
-        try await add(newPoints.points)
+        let points = try await AutodetectSceneReader(url).readAll()
+        try await add(points)
     }
 
     /// Adds splat points as a new chunk.
