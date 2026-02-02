@@ -22,7 +22,7 @@ struct SplatConverter: AsyncParsableCommand {
     @Option(name: .shortAndLong, help: "The output splat scene file")
     var outputFile: String?
 
-    @Option(name: [.customShort("f"), .long], help: "The format of the output file (dotSplat, ply, ply-ascii)")
+    @Option(name: [.customShort("f"), .long], help: "The format of the output file (dotSplat, ply, ply-ascii, spz)")
     var outputFormat: SplatOutputFileFormat?
 
     @Flag(name: [.long], help: "Describe each of the splats from first to first + count")
@@ -85,6 +85,11 @@ struct SplatConverter: AsyncParsableCommand {
                 case .asciiPLY:
                     let writer = try SplatPLYSceneWriter(to: .file(outputURL))
                     try await writer.start(sphericalHarmonicDegree: 3, binary: false, pointCount: delegate.points.count)
+                    try await writer.write(delegate.points)
+                    try await writer.close()
+                case .spz:
+                    let writer = try SPZSceneWriter(to: .file(outputURL))
+                    try await writer.start(numPoints: delegate.points.count)
                     try await writer.write(delegate.points)
                     try await writer.close()
                 }
@@ -174,13 +179,15 @@ enum SplatOutputFileFormat: ExpressibleByArgument {
     case asciiPLY
     case binaryPLY
     case dotSplat
+    case spz
 
     public init?(argument: String) {
         switch argument.lowercased() {
-        case "dotsplat": self = .dotSplat
+        case "dotsplat", "splat": self = .dotSplat
         case "ply": self.init(defaultFor: .ply)
         case "plybinary", "ply-binary", "binaryply", "binary-ply": self = .binaryPLY
         case "plyascii", "ply-ascii", "asciiply", "ascii-ply": self = .asciiPLY
+        case "spz": self = .spz
         default: return nil
         }
     }
@@ -189,6 +196,7 @@ enum SplatOutputFileFormat: ExpressibleByArgument {
         switch format {
         case .dotSplat: self = .dotSplat
         case .ply: self = .binaryPLY
+        case .spz: self = .spz
         case .none: return nil
         }
     }

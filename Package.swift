@@ -32,7 +32,8 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.0.0")
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.0.0"),
+        .package(url: "https://github.com/scier/spz-swift.git", from: "2.1.0"),
     ],
     targets: [
         .target(
@@ -49,7 +50,10 @@ let package = Package(
         ),
         .target(
             name: "SplatIO",
-            dependencies: [ "PLYIO" ],
+            dependencies: [
+                "PLYIO",
+                .product(name: "spz", package: "spz-swift"),
+            ],
             path: "SplatIO",
             sources: [ "Sources" ]
         ),
