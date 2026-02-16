@@ -48,9 +48,9 @@ public class SplatPLYSceneReader: SplatSceneReader {
 
                 for try await plyStreamElementSeries in plyStream {
                     var pointCount = 0
+                    // Skip non-vertex element types (e.g. face, extrinsic, intrinsic metadata)
                     guard plyStreamElementSeries.typeIndex == elementMapping.elementTypeIndex else {
-                        continuation.finish(throwing: Error.unsupportedFileContents("Expected type index \(elementMapping.elementTypeIndex), found \(plyStreamElementSeries.typeIndex)"))
-                        return
+                        continue
                     }
 
                     do {
