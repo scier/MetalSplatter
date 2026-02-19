@@ -3,7 +3,7 @@
 vertex FragmentIn singleStageSplatVertexShader(uint vertexID [[vertex_id]],
                                                uint instanceID [[instance_id]],
                                                ushort amplificationID [[amplification_id]],
-                                               constant ChunkTable& chunkTable [[ buffer(BufferIndexChunkTable) ]],
+                                               device const ChunkInfo* chunks [[ buffer(BufferIndexChunks) ]],
                                                constant ChunkedSplatIndex* splatIndexArray [[ buffer(BufferIndexSplatIndex) ]],
                                                constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]]) {
     Uniforms uniforms = uniformsArray.uniforms[min(int(amplificationID), kMaxViewCount)];
@@ -18,13 +18,13 @@ vertex FragmentIn singleStageSplatVertexShader(uint vertexID [[vertex_id]],
     ChunkedSplatIndex idx = splatIndexArray[splatID];
 
     // Bounds check chunk index
-    if (idx.chunkIndex >= chunkTable.enabledChunkCount) {
+    if (idx.chunkIndex >= uniforms.chunkCount) {
         FragmentIn out;
         out.position = float4(1, 1, 0, 1);
         return out;
     }
 
-    ChunkInfo chunk = chunkTable.chunks[idx.chunkIndex];
+    ChunkInfo chunk = chunks[idx.chunkIndex];
     Splat splat = chunk.splats[idx.splatIndex];
 
     return splatVertex(splat, uniforms, vertexID % 4,

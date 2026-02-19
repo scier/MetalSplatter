@@ -38,7 +38,7 @@ enum SHDegree: uint8_t
 enum BufferIndex: int32_t
 {
     BufferIndexUniforms    = 0,
-    BufferIndexChunkTable  = 1,
+    BufferIndexChunks      = 1,
     BufferIndexSplatIndex  = 2,
 };
 
@@ -55,6 +55,8 @@ typedef struct
     float focalY;                  // screenSize.y * projectionMatrix[1][1] / 2
     float tanHalfFovX;             // 1 / projectionMatrix[0][0]
     float tanHalfFovY;             // 1 / projectionMatrix[1][1]
+
+    uint chunkCount;
 
     /*
      The first N splats are represented as 2N primitives and 4N vertex indices. The remainder are represented
@@ -96,16 +98,6 @@ typedef struct
     SHDegree shDegree;             // Spherical harmonics degree for this chunk
     uint8_t _shPadding[3];         // Padding for alignment
 } ChunkInfo;
-
-// Table of all enabled chunks, passed to shaders
-// Layout: header (16 bytes) followed by variable-length chunks array
-typedef struct
-{
-    device ChunkInfo* chunks;      // Pointer to chunks array
-    uint16_t enabledChunkCount;
-    uint16_t _padding;
-    uint32_t _padding2;            // Pad to 16 bytes for alignment
-} ChunkTable;
 
 typedef struct
 {

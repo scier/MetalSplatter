@@ -95,7 +95,7 @@ public struct SplatChunk: @unchecked Sendable {
 /// Uses 8 bytes for alignment (6 bytes of meaningful data).
 /// Keep in sync with ShaderCommon.h : ChunkedSplatIndex
 public struct ChunkedSplatIndex: Sendable {
-    /// Contiguous index into the chunk table (0..<enabledChunkCount), *not* the same as ``ChunkID``.
+    /// Contiguous index into the chunks array (0..<chunkCount), *not* the same as ``ChunkID``.
     public var chunkIndex: UInt16
 
     /// Padding for alignment

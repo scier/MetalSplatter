@@ -20,8 +20,8 @@ public final class SplatRenderer: @unchecked Sendable {
         // with effectively no memory penalty compated to instancing, and slightly better performance than even using all indexing.
         static let maxIndexedSplatCount = 1024
 
-        // Chunk indices are UInt16 in ChunkedSplatIndex and ChunkTable.enabledChunkCount,
-        // so the maximum number of simultaneously enabled chunks is UInt16.max.
+        // Chunk indices are UInt16 in ChunkedSplatIndex, so the maximum number of
+        // simultaneously enabled chunks is UInt16.max.
         static let maxEnabledChunks = Int(UInt16.max)
 
         static let tileSize = MTLSize(width: 32, height: 32, depth: 1)
@@ -48,7 +48,7 @@ public final class SplatRenderer: @unchecked Sendable {
     // Keep in sync with Shaders.metal : BufferIndex
     enum BufferIndex: NSInteger {
         case uniforms    = 0
-        case chunkTable  = 1
+        case chunks      = 1
         case splatIndex  = 2
     }
 
@@ -65,6 +65,8 @@ public final class SplatRenderer: @unchecked Sendable {
         var focalY: Float                     // screenSize.y * projectionMatrix[1][1] / 2
         var tanHalfFovX: Float                // 1 / projectionMatrix[0][0]
         var tanHalfFovY: Float                // 1 / projectionMatrix[1][1]
+
+        var chunkCount: UInt32
 
         var splatCount: UInt32
         var indexedSplatCount: UInt32
@@ -86,15 +88,6 @@ public final class SplatRenderer: @unchecked Sendable {
             default: break
             }
         }
-    }
-
-    // Keep in sync with Shaders.metal : ChunkTable
-    // Expected layout: pointer (8 bytes), enabledChunkCount (2 bytes), padding (6 bytes) = 16 bytes
-    struct GPUChunkTableHeader {
-        var chunksPointer: UInt64  // GPU address of ChunkInfo array
-        var enabledChunkCount: UInt16
-        var _padding: UInt16
-        var _padding2: UInt32
     }
 
     // Keep in sync with Shaders.metal : ChunkInfo
@@ -224,7 +217,7 @@ public final class SplatRenderer: @unchecked Sendable {
     }
     private let accessState: Mutex<AccessState>
 
-    private enum BufferTag { case chunkTable }
+    private enum BufferTag { case chunks }
     private let bufferPool = MTLBufferPool<BufferTag>()
 
     /// Returns true if exclusive access is currently held. Used for precondition checks.
@@ -569,6 +562,7 @@ public final class SplatRenderer: @unchecked Sendable {
     }
 
     private func updateUniforms(forViewports viewports: [ViewportDescriptor],
+                                chunkCount: UInt32,
                                 splatCount: UInt32,
                                 indexedSplatCount: UInt32) {
         // Compute average camera position from all viewports
@@ -591,6 +585,7 @@ public final class SplatRenderer: @unchecked Sendable {
                                     focalY: focalY,
                                     tanHalfFovX: tanHalfFovX,
                                     tanHalfFovY: tanHalfFovY,
+                                    chunkCount: chunkCount,
                                     splatCount: splatCount,
                                     indexedSplatCount: indexedSplatCount)
             renderState.uniforms.pointee.setUniforms(index: i, uniforms)
@@ -614,38 +609,23 @@ public final class SplatRenderer: @unchecked Sendable {
 
     // MARK: - Chunk Table Building
 
-    private func buildChunkTableBuffer(enabledChunks: [(entry: ChunkEntry, chunkIndex: UInt16)]) -> MTLBuffer? {
-        // Layout: header followed by chunks array
-        let headerSize = MemoryLayout<GPUChunkTableHeader>.size
+    private func buildChunksBuffer(enabledChunks: [(entry: ChunkEntry, chunkIndex: UInt16)]) -> MTLBuffer? {
         let chunkInfoSize = MemoryLayout<GPUChunkInfo>.stride
-        let chunksArraySize = enabledChunks.count * chunkInfoSize
-        let requiredSize = headerSize + chunksArraySize
+        let requiredSize = enabledChunks.count * chunkInfoSize
 
         // Try to reuse a pooled buffer; allocate only if nil or too small
         let buffer: MTLBuffer
-        if let pooled = bufferPool.acquire(tag: .chunkTable), pooled.length >= requiredSize {
+        if let pooled = bufferPool.acquire(tag: .chunks), pooled.length >= requiredSize {
             buffer = pooled
         } else {
             guard let newBuffer = device.makeBuffer(length: requiredSize, options: .storageModeShared) else {
                 return nil
             }
-            newBuffer.label = "Chunk Table"
+            newBuffer.label = "Chunks"
             buffer = newBuffer
         }
 
-        let ptr = buffer.contents()
-
-        // Write header at offset 0
-        let headerPtr = ptr.assumingMemoryBound(to: GPUChunkTableHeader.self)
-        headerPtr.pointee = GPUChunkTableHeader(
-            chunksPointer: buffer.gpuAddress + UInt64(headerSize),
-            enabledChunkCount: UInt16(enabledChunks.count),
-            _padding: 0,
-            _padding2: 0
-        )
-
-        // Write chunk info array after header
-        let chunksPtr = ptr.advanced(by: headerSize).assumingMemoryBound(to: GPUChunkInfo.self)
+        let chunksPtr = buffer.contents().assumingMemoryBound(to: GPUChunkInfo.self)
         for (entry, chunkIndex) in enabledChunks {
             let shPointer = entry.chunk.shCoefficients?.buffer.gpuAddress ?? 0
 
@@ -806,16 +786,19 @@ public final class SplatRenderer: @unchecked Sendable {
         let instanceCount = (splatCount + indexedSplatCount - 1) / indexedSplatCount
 
         switchToNextDynamicBuffer()
-        updateUniforms(forViewports: viewports, splatCount: UInt32(splatCount), indexedSplatCount: UInt32(indexedSplatCount))
+        updateUniforms(forViewports: viewports,
+                       chunkCount: UInt32(enabledChunks.count),
+                       splatCount: UInt32(splatCount),
+                       indexedSplatCount: UInt32(indexedSplatCount))
 
-        // Build chunk table buffer (from pool if available)
-        guard let chunkTableBuffer = buildChunkTableBuffer(enabledChunks: enabledChunks) else {
+        // Build chunks buffer (from pool if available)
+        guard let chunksBuffer = buildChunksBuffer(enabledChunks: enabledChunks) else {
             return false
         }
 
         // Return buffer to pool when GPU is done
-        commandBuffer.addCompletedHandler { [bufferPool, chunkTableBuffer] _ in
-            bufferPool.release(chunkTableBuffer, tag: .chunkTable)
+        commandBuffer.addCompletedHandler { [bufferPool, chunksBuffer] _ in
+            bufferPool.release(chunksBuffer, tag: .chunks)
         }
 
         let multiStage = useMultiStagePipeline
@@ -875,7 +858,7 @@ public final class SplatRenderer: @unchecked Sendable {
         }
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffers, offset: renderState.uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-        renderEncoder.setVertexBuffer(chunkTableBuffer, offset: 0, index: BufferIndex.chunkTable.rawValue)
+        renderEncoder.setVertexBuffer(chunksBuffer, offset: 0, index: BufferIndex.chunks.rawValue)
         renderEncoder.setVertexBuffer(splatIndexBuffer.buffer, offset: 0, index: BufferIndex.splatIndex.rawValue)
 
         // Make splat and SH coefficient buffers resident - required when accessing via GPU addresses embedded in chunk table
