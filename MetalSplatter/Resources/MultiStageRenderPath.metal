@@ -49,6 +49,13 @@ vertex FragmentIn multiStageSplatVertexShader(uint vertexID [[vertex_id]],
     }
 
     ChunkInfo chunk = chunks[idx.chunkIndex];
+
+    if (!chunk.enabled) {
+        FragmentIn out;
+        out.position = float4(1, 1, 0, 1);
+        return out;
+    }
+
     Splat splat = chunk.splats[idx.splatIndex];
 
     return splatVertex(splat, uniforms, vertexID % 4,

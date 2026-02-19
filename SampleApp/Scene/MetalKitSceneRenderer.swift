@@ -102,7 +102,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
-        guard let modelRenderer else { return }
+        guard let modelRenderer, modelRenderer.isReadyToRender else { return }
         guard let drawable = view.currentDrawable else { return }
 
         _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
@@ -133,7 +133,6 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
             didRender = false
         }
 
-        // Only present if rendering occurred; otherwise drop the frame
         if didRender {
             commandBuffer.present(drawable)
         }

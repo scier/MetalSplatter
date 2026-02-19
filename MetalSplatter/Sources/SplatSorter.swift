@@ -87,7 +87,7 @@ class SplatSorter: @unchecked Sendable {
 
     /// Represents a chunk for sorting purposes
     struct ChunkReference {
-        let chunkIndex: UInt16
+        var chunkIndex: UInt16
         let buffer: MetalBuffer<EncodedSplatPoint>
     }
 
@@ -103,9 +103,10 @@ class SplatSorter: @unchecked Sendable {
         var mostRecentValidBufferIndex: Int? = nil
         var hasExclusiveAccess: Bool = false
         var pendingInvalidation: Bool = false  // If true, in-progress sort result should be marked invalid
-        var cameraPose: CameraPose? = nil
+        var cameraPose = CameraPose(position: .zero, forward: SIMD3(0, 0, -1))
         var needsSort: Bool = false
         var chunks: [ChunkReference] = []
+        var chunkGeneration: UInt64 = 0  // Incremented on chunk changes; prevents stale sorts from overwriting patched buffers
         var isReadingChunks: Bool = false  // True during phase 1 of sort (reading splat positions)
         var sortLoopRunning: Bool = false
     }
@@ -172,6 +173,148 @@ class SplatSorter: @unchecked Sendable {
             state.needsSort = !chunks.isEmpty
         }
         ensureSortLoopRunning()
+    }
+
+    /// Adds a chunk to the sort and patches the valid index buffer to include its splats.
+    /// The new chunk's splats are appended unsorted; the background sort will re-sort on the next cycle.
+    ///
+    /// Must be called when no render references are held (i.e., inside withChunkAccess).
+    func addChunkToSort(_ chunk: ChunkReference) throws {
+        try state.withLock { state in
+            state.chunks.append(chunk)
+            state.chunkGeneration &+= 1
+            state.needsSort = true
+            try extendValidBufferWithNewChunk(chunk, state: &state)
+        }
+        ensureSortLoopRunning()
+    }
+
+    /// Removes a chunk from the sort and patches the valid index buffer to exclude its splats.
+    /// Surviving entries are remapped to their new contiguous chunk indices.
+    ///
+    /// Must be called when no render references are held (i.e., inside withChunkAccess).
+    ///
+    /// - Parameters:
+    ///   - removedChunkIndex: The chunk index being removed
+    ///   - indexMapping: Maps old chunk index → new chunk index for all surviving chunks.
+    func removeChunkFromSort(removedChunkIndex: UInt16,
+                             indexMapping: [UInt16: UInt16]) throws {
+        try state.withLock { state in
+            state.chunks.removeAll { $0.chunkIndex == removedChunkIndex }
+            // Remap surviving chunks' indices to match new contiguous layout
+            for i in 0..<state.chunks.count {
+                if let newIndex = indexMapping[state.chunks[i].chunkIndex] {
+                    state.chunks[i].chunkIndex = newIndex
+                }
+            }
+            state.chunkGeneration &+= 1
+            state.needsSort = !state.chunks.isEmpty
+            try removeChunkFromValidBuffer(removedChunkIndex: removedChunkIndex,
+                                           indexMapping: indexMapping, state: &state)
+        }
+        ensureSortLoopRunning()
+    }
+
+    // MARK: - Index Buffer Patching (requires caller to hold state lock)
+
+    /// Writes sequential (unsorted) indices for the given chunks into a free buffer and marks it valid.
+    /// Used as a fallback when no existing valid buffer can be patched.
+    ///
+    /// Requires: caller holds the state lock.
+    private func writeSequentialIndicesToFreeBuffer(for chunks: [ChunkReference],
+                                                    state: inout State) throws {
+        let totalSplatCount = chunks.reduce(0) { $0 + $1.buffer.count }
+        guard totalSplatCount > 0 else { return }
+
+        // Find a free buffer (not being sorted, refcount 0)
+        guard let freeIndex = (0..<state.indexBuffers.count).first(where: {
+            state.indexBuffers[$0].referenceCount == 0 && state.sortingBufferIndex != $0
+        }) else { return }
+
+        let buffer = state.indexBuffers[freeIndex].buffer
+        try buffer.ensureCapacity(totalSplatCount)
+        buffer.count = totalSplatCount
+
+        var writePos = 0
+        for chunk in chunks {
+            for splatIndex in 0..<chunk.buffer.count {
+                buffer.values[writePos] = ChunkedSplatIndex(
+                    chunkIndex: chunk.chunkIndex,
+                    splatIndex: UInt32(splatIndex)
+                )
+                writePos += 1
+            }
+        }
+
+        state.indexBuffers[freeIndex].isValid = true
+        state.mostRecentValidBufferIndex = freeIndex
+    }
+
+    /// Extends the current valid index buffer with unsorted entries for a newly-added chunk.
+    /// Falls back to writing sequential indices for all chunks if no valid buffer exists.
+    ///
+    /// Requires: caller holds the state lock.
+    private func extendValidBufferWithNewChunk(_ chunk: ChunkReference,
+                                               state: inout State) throws {
+        guard let validIndex = state.mostRecentValidBufferIndex,
+              state.indexBuffers[validIndex].isValid,
+              state.sortingBufferIndex != validIndex else {
+            try writeSequentialIndicesToFreeBuffer(for: state.chunks, state: &state)
+            return
+        }
+
+        let buffer = state.indexBuffers[validIndex].buffer
+        let existingCount = buffer.count
+        let newTotal = existingCount + chunk.buffer.count
+
+        try buffer.ensureCapacity(newTotal)
+
+        for splatIndex in 0..<chunk.buffer.count {
+            buffer.values[existingCount + splatIndex] = ChunkedSplatIndex(
+                chunkIndex: chunk.chunkIndex,
+                splatIndex: UInt32(splatIndex)
+            )
+        }
+        buffer.count = newTotal
+    }
+
+    /// Removes entries for a deleted chunk from the valid index buffer and remaps surviving
+    /// chunk indices to their new contiguous values. Single pass, O(n).
+    /// Falls back to writing sequential indices for remaining chunks if no valid buffer exists.
+    ///
+    /// Requires: caller holds the state lock.
+    private func removeChunkFromValidBuffer(removedChunkIndex: UInt16,
+                                            indexMapping: [UInt16: UInt16],
+                                            state: inout State) throws {
+        guard let validIndex = state.mostRecentValidBufferIndex,
+              state.indexBuffers[validIndex].isValid,
+              state.sortingBufferIndex != validIndex else {
+            if !state.chunks.isEmpty {
+                try writeSequentialIndicesToFreeBuffer(for: state.chunks, state: &state)
+            }
+            return
+        }
+
+        let buffer = state.indexBuffers[validIndex].buffer
+
+        var writePos = 0
+        for readPos in 0..<buffer.count {
+            let entry = buffer.values[readPos]
+            if entry.chunkIndex != removedChunkIndex,
+               let newIndex = indexMapping[entry.chunkIndex] {
+                buffer.values[writePos] = ChunkedSplatIndex(
+                    chunkIndex: newIndex,
+                    splatIndex: entry.splatIndex
+                )
+                writePos += 1
+            }
+        }
+        buffer.count = writePos
+
+        if writePos == 0 {
+            state.indexBuffers[validIndex].isValid = false
+            state.mostRecentValidBufferIndex = nil
+        }
     }
 
     // MARK: - Camera Pose Updates
@@ -358,16 +501,16 @@ class SplatSorter: @unchecked Sendable {
 
         while !Task.isCancelled {
             // Check if we need to sort
-            let sortParams = state.withLock { state -> (chunks: [ChunkReference], pose: CameraPose, bufferIndex: Int)? in
+            let sortParams = state.withLock { state -> (chunks: [ChunkReference], pose: CameraPose, bufferIndex: Int, chunkGeneration: UInt64)? in
                 // Don't sort during exclusive access
                 guard !state.hasExclusiveAccess else { return nil }
 
                 // Check if sort is needed
                 guard state.needsSort,
-                      !state.chunks.isEmpty,
-                      let pose = state.cameraPose else {
+                      !state.chunks.isEmpty else {
                     return nil
                 }
+                let pose = state.cameraPose
 
                 // Find a buffer with refcount 0
                 guard let bufferIndex = state.indexBuffers.firstIndex(where: { $0.referenceCount == 0 }) else {
@@ -379,7 +522,7 @@ class SplatSorter: @unchecked Sendable {
                 state.isReadingChunks = true
                 state.needsSort = false
 
-                return (state.chunks, pose, bufferIndex)
+                return (state.chunks, pose, bufferIndex, state.chunkGeneration)
             }
 
             guard let params = sortParams else {
@@ -400,7 +543,8 @@ class SplatSorter: @unchecked Sendable {
             await performSort(
                 chunks: params.chunks,
                 cameraPose: params.pose,
-                targetBufferIndex: params.bufferIndex
+                targetBufferIndex: params.bufferIndex,
+                chunkGeneration: params.chunkGeneration
             )
         }
     }
@@ -408,7 +552,8 @@ class SplatSorter: @unchecked Sendable {
     private func performSort(
         chunks: [ChunkReference],
         cameraPose: CameraPose,
-        targetBufferIndex: Int
+        targetBufferIndex: Int,
+        chunkGeneration: UInt64
     ) async {
         let startTime = Date()
         onSortStart?()
@@ -474,12 +619,13 @@ class SplatSorter: @unchecked Sendable {
             return
         }
 
-        // Phase 4: Mark buffer as valid (unless invalidation was requested)
+        // Phase 4: Mark buffer as valid (unless invalidation was requested or chunks changed)
         let wasInvalidated = state.withLock { state -> Bool in
             state.sortingBufferIndex = nil
 
-            // If invalidation was requested during sort, don't mark as valid
-            if state.pendingInvalidation {
+            // If invalidation was requested during sort, or chunks changed since we started,
+            // don't mark as valid — a patched buffer may already exist
+            if state.pendingInvalidation || state.chunkGeneration != chunkGeneration {
                 return true
             }
 

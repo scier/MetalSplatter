@@ -149,6 +149,22 @@ final class VisionSceneRenderer: @unchecked Sendable {
         let drawables = frame.queryDrawables()
         guard !drawables.isEmpty else { return }
 
+        // If not ready to render, complete the frame lifecycle with empty
+        // command buffers to avoid CompositorServices "too many frames in
+        // flight" crash, then return early.
+        guard let modelRenderer, modelRenderer.isReadyToRender else {
+            frame.startSubmission()
+            for drawable in drawables {
+                guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                    fatalError("Failed to create command buffer")
+                }
+                drawable.encodePresent(commandBuffer: commandBuffer)
+                commandBuffer.commit()
+            }
+            frame.endSubmission()
+            return
+        }
+
         _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
 
         frame.startSubmission()
@@ -177,25 +193,19 @@ final class VisionSceneRenderer: @unchecked Sendable {
 
             let viewports = self.viewports(drawable: drawable, deviceAnchor: deviceAnchor)
 
-            let didRender: Bool
             do {
-                didRender = try modelRenderer?.render(viewports: viewports,
-                                                      colorTexture: drawable.colorTextures[0],
-                                                      colorStoreAction: .store,
-                                                      depthTexture: drawable.depthTextures[0],
-                                                      rasterizationRateMap: drawable.rasterizationRateMaps.first,
-                                                      renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
-                                                      to: commandBuffer) ?? false
+                try modelRenderer.render(viewports: viewports,
+                                          colorTexture: drawable.colorTextures[0],
+                                          colorStoreAction: .store,
+                                          depthTexture: drawable.depthTextures[0],
+                                          rasterizationRateMap: drawable.rasterizationRateMaps.first,
+                                          renderTargetArrayLength: layerRenderer.configuration.layout == .layered ? drawable.views.count : 1,
+                                          to: commandBuffer)
             } catch {
                 Self.log.error("Unable to render scene: \(error.localizedDescription)")
-                didRender = false
             }
 
-            // Only present if rendering occurred; otherwise drop the frame
-            if didRender {
-                drawable.encodePresent(commandBuffer: commandBuffer)
-            }
-
+            drawable.encodePresent(commandBuffer: commandBuffer)
             commandBuffer.commit()
         }
 

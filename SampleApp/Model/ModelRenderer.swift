@@ -9,6 +9,10 @@ public struct ModelRendererViewportDescriptor {
 }
 
 public protocol ModelRenderer: Sendable {
+    /// Returns true if the renderer is likely ready to render successfully.
+    /// Check this before acquiring a drawable to avoid wasting frames.
+    var isReadyToRender: Bool { get }
+
     /// Renders to the given command buffer.
     /// - Returns: `true` if rendering was performed, `false` if the frame should be dropped.
     @discardableResult

@@ -21,8 +21,8 @@ public final class SplatRenderer: @unchecked Sendable {
         static let maxIndexedSplatCount = 1024
 
         // Chunk indices are UInt16 in ChunkedSplatIndex, so the maximum number of
-        // simultaneously enabled chunks is UInt16.max.
-        static let maxEnabledChunks = Int(UInt16.max)
+        // simultaneous chunks (enabled + disabled) is UInt16.max.
+        static let maxChunks = Int(UInt16.max)
 
         static let tileSize = MTLSize(width: 32, height: 32, depth: 1)
     }
@@ -91,13 +91,14 @@ public final class SplatRenderer: @unchecked Sendable {
     }
 
     // Keep in sync with Shaders.metal : ChunkInfo
-    // Expected layout: splatsPointer (8), shCoefficientsPointer (8), splatCount (4), shDegree (1), padding (3) = 24 bytes
+    // Expected layout: splatsPointer (8), shCoefficientsPointer (8), splatCount (4), shDegree (1), enabled (1), padding (2) = 24 bytes
     struct GPUChunkInfo {
         var splatsPointer: UInt64             // device pointer to splats
         var shCoefficientsPointer: UInt64     // device pointer to SH coefficients (0 for SH0)
         var splatCount: UInt32
         var shDegree: UInt8                   // SHDegree enum value
-        var _shPadding: (UInt8, UInt8, UInt8) = (0, 0, 0)
+        var enabled: UInt8                    // Non-zero = enabled for rendering
+        var _shPadding: (UInt8, UInt8) = (0, 0)
     }
 
     public let device: MTLDevice
@@ -163,8 +164,12 @@ public final class SplatRenderer: @unchecked Sendable {
     private var chunks: [ChunkID: ChunkEntry] = [:]
     private var nextChunkID: UInt = 0
 
+    /// Chunk IDs in chunk-index order: `orderedChunkIDs[i]` is the chunk at index `i`.
+    /// Append-only on add; compact on remove.
+    private var orderedChunkIDs: [ChunkID] = []
+
     /// Maps ChunkID to the contiguous chunk index used by the sorter and shaders.
-    /// Updated when chunks are added, removed, or enabled/disabled.
+    /// Rebuilt from `orderedChunkIDs` whenever chunks are added or removed.
     private var chunkIDToIndex: [ChunkID: UInt16] = [:]
 
     private let sorter: SplatSorter
@@ -225,6 +230,16 @@ public final class SplatRenderer: @unchecked Sendable {
         accessState.withLock { $0.hasExclusiveAccess }
     }
 
+    /// Returns true if the renderer is likely ready to render successfully.
+    /// Check this before acquiring a drawable to avoid wasting frames.
+    public var isReadyToRender: Bool {
+        accessState.withLock { state in
+            !state.hasExclusiveAccess &&
+            !state.isRendering &&
+            state.inFlightRenderCount < maxSimultaneousRenders
+        }
+    }
+
     /// Total splat count across all enabled chunks
     public var splatCount: Int {
         chunks.values
@@ -279,29 +294,53 @@ public final class SplatRenderer: @unchecked Sendable {
     // MARK: - Chunk Management
 
     /// Adds a chunk to the renderer. The chunk should not be modified after this method returns, except during withChunkAccess {...}.
+    ///
+    /// Disabled chunks participate in sorting but are not rendered. Adding a chunk as disabled
+    /// prepares it for instant future enabling: once a background sort cycle completes, enabling
+    /// takes effect on the very next frame with no visual glitches. For instance, this could allow a
+    /// seamless switch between two alternative versions of a chunk.
+    ///
+    /// There is a performance cost to including chunks even if they're disabled: their splats are sorted every cycle (CPU) and
+    /// processed by the vertex shader every frame (GPU), proportional to the disabled chunk's splat count.
+    ///
     /// - Parameters:
     ///   - chunk: The chunk to add
     ///   - sortByLocality: If true (the default), reorders splats by Morton code to improve cache performance during rendering.
     ///     Set to false if you need to preserve the original splat ordering, or if you'd like to control performance by calling
-    ///     SplatChunk.sortByLocality() yourself prior to to caling this method.
+    ///     SplatChunk.sortByLocality() yourself prior to calling this method.
+    ///   - enabled: Whether the chunk should be rendered immediately. Defaults to true.
     /// - Returns: The assigned chunk ID
     @discardableResult
-    public func addChunk(_ chunk: SplatChunk, sortByLocality: Bool = true) async -> ChunkID {
+    public func addChunk(_ chunk: SplatChunk, sortByLocality: Bool = true, enabled: Bool = true) async -> ChunkID {
         if sortByLocality {
             chunk.sortByLocality()
         }
 
         return await withChunkAccess {
+            if orderedChunkIDs.count >= Constants.maxChunks {
+                Self.log.warning("Maximum chunk count (\(Constants.maxChunks)) exceeded; chunk will not be added")
+                let id = ChunkID(rawValue: nextChunkID)
+                nextChunkID += 1
+                return id
+            }
+
             let id = ChunkID(rawValue: nextChunkID)
             nextChunkID += 1
 
             chunks[id] = ChunkEntry(
                 id: id,
                 chunk: chunk,
-                isEnabled: true
+                isEnabled: enabled
             )
 
-            updateSorterChunks()
+            orderedChunkIDs.append(id)
+            let chunkIndex = UInt16(orderedChunkIDs.count - 1)
+            chunkIDToIndex[id] = chunkIndex
+
+            try? sorter.addChunkToSort(SplatSorter.ChunkReference(
+                chunkIndex: chunkIndex,
+                buffer: chunk.splats
+            ))
             return id
         }
     }
@@ -310,8 +349,23 @@ public final class SplatRenderer: @unchecked Sendable {
     /// - Parameter id: The chunk ID to remove
     public func removeChunk(_ id: ChunkID) async {
         await withChunkAccess {
+            guard let removedIndex = chunkIDToIndex[id] else { return }
             chunks.removeValue(forKey: id)
-            updateSorterChunks()
+            orderedChunkIDs.removeAll { $0 == id }
+
+            // Rebuild chunkIDToIndex from orderedChunkIDs
+            chunkIDToIndex.removeAll()
+            var indexMapping: [UInt16: UInt16] = [:]
+            for (newIdx, chunkID) in orderedChunkIDs.enumerated() {
+                let newChunkIndex = UInt16(newIdx)
+                // The old index for this chunk was its previous position;
+                // find it from the fact that positions after removedIndex shift down
+                let oldIdx = UInt16(newIdx) >= removedIndex ? UInt16(newIdx) + 1 : UInt16(newIdx)
+                chunkIDToIndex[chunkID] = newChunkIndex
+                indexMapping[oldIdx] = newChunkIndex
+            }
+
+            try? sorter.removeChunkFromSort(removedChunkIndex: removedIndex, indexMapping: indexMapping)
         }
     }
 
@@ -319,18 +373,24 @@ public final class SplatRenderer: @unchecked Sendable {
     public func removeAllChunks() async {
         await withChunkAccess {
             chunks.removeAll()
+            orderedChunkIDs.removeAll()
+            chunkIDToIndex.removeAll()
             sorter.setChunks([])
         }
     }
 
     /// Enables or disables a chunk for rendering.
+    ///
+    /// This does not interact with the sorter — disabled chunks continue to participate
+    /// in sorting. The enabled flag takes effect on the next render() call via the GPU
+    /// chunk table. This makes enable/disable instant with no sort latency.
+    ///
     /// - Parameters:
     ///   - id: The chunk ID
     ///   - enabled: Whether the chunk should be rendered
     public func setChunkEnabled(_ id: ChunkID, enabled: Bool) async {
         await withChunkAccess {
             chunks[id]?.isEnabled = enabled
-            updateSorterChunks()
         }
     }
 
@@ -378,31 +438,6 @@ public final class SplatRenderer: @unchecked Sendable {
         }
 
         return try body()
-    }
-
-    private func updateSorterChunks() {
-        // Build the list of enabled chunks for the sorter
-        // Assign contiguous chunk indices for this sort/render cycle
-        var chunkReferences: [SplatSorter.ChunkReference] = []
-        var newChunkIDToIndex: [ChunkID: UInt16] = [:]
-        var index: UInt16 = 0
-
-        for entry in chunks.values where entry.isEnabled {
-            if Int(index) >= Constants.maxEnabledChunks {
-                Self.log.warning("Maximum enabled chunk count (\(Constants.maxEnabledChunks)) exceeded; additional chunks will not be rendered")
-                break
-            }
-
-            chunkReferences.append(SplatSorter.ChunkReference(
-                chunkIndex: index,
-                buffer: entry.chunk.splats
-            ))
-            newChunkIDToIndex[entry.id] = index
-            index += 1
-        }
-
-        chunkIDToIndex = newChunkIDToIndex
-        sorter.setChunks(chunkReferences)
     }
 
     /// Called when a render's command buffer completes on the GPU.
@@ -609,9 +644,9 @@ public final class SplatRenderer: @unchecked Sendable {
 
     // MARK: - Chunk Table Building
 
-    private func buildChunksBuffer(enabledChunks: [(entry: ChunkEntry, chunkIndex: UInt16)]) -> MTLBuffer? {
+    private func buildChunksBuffer(allChunks: [ChunkEntry]) -> MTLBuffer? {
         let chunkInfoSize = MemoryLayout<GPUChunkInfo>.stride
-        let requiredSize = enabledChunks.count * chunkInfoSize
+        let requiredSize = allChunks.count * chunkInfoSize
 
         // Try to reuse a pooled buffer; allocate only if nil or too small
         let buffer: MTLBuffer
@@ -626,14 +661,15 @@ public final class SplatRenderer: @unchecked Sendable {
         }
 
         let chunksPtr = buffer.contents().assumingMemoryBound(to: GPUChunkInfo.self)
-        for (entry, chunkIndex) in enabledChunks {
+        for (chunkIndex, entry) in allChunks.enumerated() {
             let shPointer = entry.chunk.shCoefficients?.buffer.gpuAddress ?? 0
 
-            chunksPtr[Int(chunkIndex)] = GPUChunkInfo(
+            chunksPtr[chunkIndex] = GPUChunkInfo(
                 splatsPointer: entry.chunk.splats.buffer.gpuAddress,
                 shCoefficientsPointer: shPointer,
                 splatCount: UInt32(entry.chunk.splatCount),
-                shDegree: entry.chunk.shDegree.rawValue
+                shDegree: entry.chunk.shDegree.rawValue,
+                enabled: entry.isEnabled ? 1 : 0
             )
         }
 
@@ -754,14 +790,10 @@ public final class SplatRenderer: @unchecked Sendable {
             self?.renderCompleted()
         }
 
-        // Build list of enabled chunks with their sort indices (from the stored mapping)
-        var enabledChunks: [(entry: ChunkEntry, chunkIndex: UInt16)] = []
-        for entry in chunks.values where entry.isEnabled {
-            guard let chunkIndex = chunkIDToIndex[entry.id] else { continue }
-            enabledChunks.append((entry, chunkIndex))
-        }
-
-        guard !enabledChunks.isEmpty else { return false }
+        // Build ordered list of all chunks (enabled + disabled); array index = chunk index
+        let allChunks: [ChunkEntry] = orderedChunkIDs.compactMap { chunks[$0] }
+        assert(allChunks.count == orderedChunkIDs.count)
+        assert(allChunks.count == chunkIDToIndex.count)
 
         // Compute camera pose for sorting
         let cameraPose = Self.cameraWorldPose(forViewports: viewports)
@@ -787,12 +819,12 @@ public final class SplatRenderer: @unchecked Sendable {
 
         switchToNextDynamicBuffer()
         updateUniforms(forViewports: viewports,
-                       chunkCount: UInt32(enabledChunks.count),
+                       chunkCount: UInt32(allChunks.count),
                        splatCount: UInt32(splatCount),
                        indexedSplatCount: UInt32(indexedSplatCount))
 
-        // Build chunks buffer (from pool if available)
-        guard let chunksBuffer = buildChunksBuffer(enabledChunks: enabledChunks) else {
+        // Build chunks buffer (from pool if available) — includes all chunks with enabled flag
+        guard let chunksBuffer = buildChunksBuffer(allChunks: allChunks) else {
             return false
         }
 
@@ -861,10 +893,10 @@ public final class SplatRenderer: @unchecked Sendable {
         renderEncoder.setVertexBuffer(chunksBuffer, offset: 0, index: BufferIndex.chunks.rawValue)
         renderEncoder.setVertexBuffer(splatIndexBuffer.buffer, offset: 0, index: BufferIndex.splatIndex.rawValue)
 
-        // Make splat and SH coefficient buffers resident - required when accessing via GPU addresses embedded in chunk table
-        for (entry, _) in enabledChunks {
+        // Make splat and SH coefficient buffers resident for all chunks (enabled + disabled).
+        // The shader may briefly access disabled chunks' pointers before the enabled check.
+        for entry in allChunks {
             renderEncoder.useResource(entry.chunk.splats.buffer, usage: .read, stages: .vertex)
-            // Also make SH coefficient buffer resident if present
             if let shBuffer = entry.chunk.shCoefficients?.buffer {
                 renderEncoder.useResource(shBuffer, usage: .read, stages: .vertex)
             }

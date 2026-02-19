@@ -96,7 +96,8 @@ typedef struct
     device half* shCoefficients;   // Null for SH degree 0, otherwise higher-order SH coefficients
     uint32_t splatCount;
     SHDegree shDegree;             // Spherical harmonics degree for this chunk
-    uint8_t _shPadding[3];         // Padding for alignment
+    uint8_t enabled;               // Non-zero = enabled for rendering
+    uint8_t _shPadding[2];         // Padding for alignment
 } ChunkInfo;
 
 typedef struct

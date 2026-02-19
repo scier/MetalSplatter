@@ -2,6 +2,8 @@ import Metal
 import SampleBoxRenderer
 
 extension SampleBoxRenderer: ModelRenderer {
+    public var isReadyToRender: Bool { true }
+
     @discardableResult
     public func render(viewports: [ModelRendererViewportDescriptor],
                        colorTexture: MTLTexture,
