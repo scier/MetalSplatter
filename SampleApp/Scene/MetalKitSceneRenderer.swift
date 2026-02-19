@@ -6,6 +6,7 @@ import MetalSplatter
 import os
 import SampleBoxRenderer
 import simd
+import SplatIO
 import SwiftUI
 
 @MainActor
@@ -52,7 +53,10 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
                                           sampleCount: metalKitView.sampleCount,
                                           maxViewCount: 1,
                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            try await splat.read(from: url)
+            let reader = try AutodetectSceneReader(url)
+            let points = try await reader.readAll()
+            let chunk = try SplatChunk(device: device, from: points)
+            await splat.addChunk(chunk)
             modelRenderer = splat
         case .sampleBox:
             modelRenderer = try! SampleBoxRenderer(device: device,

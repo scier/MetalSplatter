@@ -6,6 +6,7 @@ import MetalSplatter
 import os
 import SampleBoxRenderer
 import simd
+import SplatIO
 import SwiftUI
 
 extension LayerRenderer.Clock.Instant.Duration {
@@ -75,7 +76,10 @@ final class VisionSceneRenderer: @unchecked Sendable {
                                           sampleCount: 1,
                                           maxViewCount: layerRenderer.properties.viewCount,
                                           maxSimultaneousRenders: Constants.maxSimultaneousRenders)
-            try await splat.read(from: url)
+            let reader = try AutodetectSceneReader(url)
+            let points = try await reader.readAll()
+            let chunk = try SplatChunk(device: device, from: points)
+            await splat.addChunk(chunk)
             modelRenderer = splat
         case .sampleBox:
             modelRenderer = try SampleBoxRenderer(device: device,
