@@ -789,17 +789,14 @@ public final class SplatRenderer: @unchecked Sendable {
             Thread.sleep(forTimeInterval: 0.001)
         }
 
-        // Clear isRendering when we exit this method (whether by return or throw)
+        var renderCompletionScheduled = false
         defer {
             accessState.withLock { state in
                 state.isRendering = false
             }
-        }
-
-        // Add completion handler to signal when GPU work is done.
-        // This must be added early, before any early returns, to ensure the count is always decremented.
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            self?.renderCompleted()
+            if !renderCompletionScheduled {
+                renderCompleted()
+            }
         }
 
         // Build ordered list of all chunks (enabled + disabled); array index = chunk index
@@ -821,7 +818,15 @@ public final class SplatRenderer: @unchecked Sendable {
             }
         }
         guard let splatIndexBuffer else { return false }
-        defer { sorter.releaseSortedIndices(splatIndexBuffer) }
+
+        commandBuffer.addCompletedHandler { [sorter, weak self] _ in
+            self?.renderCompleted()
+
+            // Retain the splatIndexBuffer alive until GPU completion so it won't
+            // be reused by the sorter while we're still using it
+            sorter.releaseSortedIndices(splatIndexBuffer)
+        }
+        renderCompletionScheduled = true
 
         let splatCount = splatIndexBuffer.count
         guard splatCount != 0 else { return false }
