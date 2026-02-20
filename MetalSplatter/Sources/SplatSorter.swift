@@ -370,6 +370,11 @@ class SplatSorter: @unchecked Sendable {
                 return nil
             }
 
+            // Never hand out a buffer while a sort pass is writing into it.
+            guard state.sortingBufferIndex != validIndex else {
+                return nil
+            }
+
             // Increment reference count and return
             state.indexBuffers[validIndex].referenceCount += 1
             return state.indexBuffers[validIndex].buffer
@@ -512,8 +517,17 @@ class SplatSorter: @unchecked Sendable {
                 }
                 let pose = state.cameraPose
 
-                // Find a buffer with refcount 0
-                guard let bufferIndex = state.indexBuffers.firstIndex(where: { $0.referenceCount == 0 }) else {
+                // Use a free staging buffer with refcount 0 that is not the currently
+                // published valid buffer.
+                guard let bufferIndex = state.indexBuffers.indices.first(where: { index in
+                    guard state.indexBuffers[index].referenceCount == 0 else {
+                        return false
+                    }
+                    if let mostRecent = state.mostRecentValidBufferIndex, index == mostRecent {
+                        return false
+                    }
+                    return true
+                }) else {
                     return nil
                 }
 
