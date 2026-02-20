@@ -89,3 +89,66 @@ fileprivate extension MetalBuffer where T == EncodedSplatPoint {
         return (min: minBounds, max: maxBounds)
     }
 }
+
+fileprivate extension UnsafeMutablePointer {
+    /// Reorder elements so that `self[i] = originalSelf[sortedIndices[i]]`.
+    mutating func reorderInPlace(fromSourceIndices sourceIndices: [Int]) {
+        let count = sourceIndices.count
+        var visited = [Bool](repeating: false, count: count)
+
+        for i in 0..<count {
+            guard !visited[i] else { continue }
+
+            var current = i
+            let temp = advanced(by: current).move()
+
+            while true {
+                visited[current] = true
+                let next = sourceIndices[current]
+
+                if visited[next] {
+                    advanced(by: current).initialize(to: temp)
+                    break
+                } else {
+                    advanced(by: current).moveUpdate(from: advanced(by: next), count: 1)
+                    current = next
+                }
+            }
+        }
+    }
+
+    /// Reorders groups of elements in place, where each group has `groupSize` consecutive elements.
+    /// sourceIndices[i] indicates which source group should end up at destination group i.
+    func reorderGroupsInPlace(fromSourceIndices sourceIndices: [Int], groupSize: Int) {
+        guard groupSize > 0 else { return }
+        let groupCount = sourceIndices.count
+        var visited = [Bool](repeating: false, count: groupCount)
+
+        // Temporary storage for one group
+        let temp = UnsafeMutablePointer<Pointee>.allocate(capacity: groupSize)
+        defer { temp.deallocate() }
+
+        for i in 0..<groupCount {
+            guard !visited[i] else { continue }
+
+            var current = i
+            // Copy source group to temp
+            temp.moveInitialize(from: advanced(by: current * groupSize), count: groupSize)
+
+            while true {
+                visited[current] = true
+                let next = sourceIndices[current]
+
+                if visited[next] {
+                    // Place temp into current position
+                    advanced(by: current * groupSize).moveInitialize(from: temp, count: groupSize)
+                    break
+                } else {
+                    // Move next group into current position
+                    advanced(by: current * groupSize).moveUpdate(from: advanced(by: next * groupSize), count: groupSize)
+                    current = next
+                }
+            }
+        }
+    }
+}
