@@ -109,6 +109,7 @@ class SplatSorter: @unchecked Sendable {
         var chunkGeneration: UInt64 = 0  // Incremented on chunk changes; prevents stale sorts from overwriting patched buffers
         var isReadingChunks: Bool = false  // True during phase 1 of sort (reading splat positions)
         var sortLoopRunning: Bool = false
+        var pendingSortCompletionHandlers: [@Sendable () -> Void] = []
     }
 
     struct CameraPose: Equatable {
@@ -407,6 +408,18 @@ class SplatSorter: @unchecked Sendable {
         }
     }
 
+    // MARK: - Sort Completion Handlers
+
+    /// Registers a one-shot handler to be called after the next successful sort completes.
+    /// If a sort is invalidated, the handler carries over to the next successful sort.
+    /// Handlers are called outside the state lock on the sort background thread.
+    func addSortCompletionHandler(_ handler: @escaping @Sendable () -> Void) {
+        state.withLock { state in
+            state.pendingSortCompletionHandlers.append(handler)
+        }
+        ensureSortLoopRunning()
+    }
+
     // MARK: - Exclusive Access for Chunk Updates
 
     /// Provides exclusive access to update chunks.
@@ -634,24 +647,33 @@ class SplatSorter: @unchecked Sendable {
         }
 
         // Phase 4: Mark buffer as valid (unless invalidation was requested or chunks changed)
-        let wasInvalidated = state.withLock { state -> Bool in
+        let (wasInvalidated, completionHandlers) = state.withLock { state -> (Bool, [@Sendable () -> Void]) in
             state.sortingBufferIndex = nil
 
             // If invalidation was requested during sort, or chunks changed since we started,
             // don't mark as valid — a patched buffer may already exist
             if state.pendingInvalidation || state.chunkGeneration != chunkGeneration {
-                return true
+                return (true, [])
             }
 
             state.indexBuffers[targetBufferIndex].isValid = true
             state.mostRecentValidBufferIndex = targetBufferIndex
-            return false
+
+            // Drain pending sort completion handlers on successful sort
+            let handlers = state.pendingSortCompletionHandlers
+            state.pendingSortCompletionHandlers.removeAll()
+            return (false, handlers)
         }
 
         // Notify completion (even if invalidated, the sort work was done)
         if !wasInvalidated {
             let duration = -startTime.timeIntervalSinceNow
             onSortComplete?(duration)
+
+            // Fire one-shot sort completion handlers outside the lock
+            for handler in completionHandlers {
+                handler()
+            }
         }
     }
 }

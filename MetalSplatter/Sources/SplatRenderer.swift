@@ -248,6 +248,13 @@ public final class SplatRenderer: @unchecked Sendable {
             .reduce(0) { $0 + $1.chunk.splatCount }
     }
 
+    /// Registers a one-shot handler to be called after the next successful sort completes.
+    /// Use this to wait until a newly-added chunk has been included in a valid sorted index buffer
+    /// before enabling it, to avoid visual glitches.
+    public func afterNextSort(_ handler: @escaping @Sendable () -> Void) {
+        sorter.addSortCompletionHandler(handler)
+    }
+
     public init(device: MTLDevice,
                 colorFormat: MTLPixelFormat,
                 depthFormat: MTLPixelFormat,
