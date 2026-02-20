@@ -235,6 +235,7 @@ public final class SplatRenderer: @unchecked Sendable {
     public var isReadyToRender: Bool {
         accessState.withLock { state in
             !state.hasExclusiveAccess &&
+            state.exclusiveAccessWaiters.isEmpty &&
             !state.isRendering &&
             state.inFlightRenderCount < maxSimultaneousRenders
         }
@@ -423,7 +424,9 @@ public final class SplatRenderer: @unchecked Sendable {
 
         await withCheckedContinuation { continuation in
             let readyNow = accessState.withLock { state -> Bool in
-                if !state.hasExclusiveAccess && state.inFlightRenderCount == 0 {
+                if !state.hasExclusiveAccess &&
+                    state.exclusiveAccessWaiters.isEmpty &&
+                    state.inFlightRenderCount == 0 {
                     state.hasExclusiveAccess = true
                     return true
                 }
@@ -768,6 +771,11 @@ public final class SplatRenderer: @unchecked Sendable {
         while true {
             let acquired = accessState.withLock { state -> Bool in
                 if state.hasExclusiveAccess {
+                    return false
+                }
+                // If chunk-access waiters exist, stop admitting new renders so
+                // in-flight work can drain to zero and exclusive access can proceed.
+                if !state.exclusiveAccessWaiters.isEmpty {
                     return false
                 }
                 if state.isRendering {
