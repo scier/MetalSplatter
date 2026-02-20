@@ -402,7 +402,9 @@ public final class SplatRenderer: @unchecked Sendable {
     }
 
 
-    // MARK: - Private Chunk Helpers
+    // MARK: - Chunk Access
+
+    @TaskLocal private static var _insideChunkAccess = false
 
     /// Provides exclusive access to modify chunks.
     ///
@@ -410,7 +412,15 @@ public final class SplatRenderer: @unchecked Sendable {
     /// and prevents new renders from starting until the body completes.
     /// The calling task suspends (without blocking a thread) until exclusive access is available.
     /// Multiple concurrent callers are queued and granted access in order.
-    private func withChunkAccess<T>(_ body: () throws -> T) async rethrows -> T {
+    ///
+    /// This method is reentrant: calling chunk-management methods (e.g. ``addChunk(_:sortByLocality:enabled:)``,
+    /// ``removeChunk(_:)``, ``setChunkEnabled(_:enabled:)``) from within the body is safe and avoids
+    /// re-acquiring the lock. This allows multiple operations to execute atomically with respect to rendering.
+    public func withChunkAccess<T>(_ body: () async throws -> T) async rethrows -> T {
+        if Self._insideChunkAccess {
+            return try await body()
+        }
+
         await withCheckedContinuation { continuation in
             let readyNow = accessState.withLock { state -> Bool in
                 if !state.hasExclusiveAccess && state.inFlightRenderCount == 0 {
@@ -437,7 +447,9 @@ public final class SplatRenderer: @unchecked Sendable {
             nextWaiter?.resume()
         }
 
-        return try body()
+        return try await Self.$_insideChunkAccess.withValue(true) {
+            try await body()
+        }
     }
 
     /// Called when a render's command buffer completes on the GPU.
