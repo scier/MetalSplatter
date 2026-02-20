@@ -26,6 +26,13 @@ vertex FragmentIn singleStageSplatVertexShader(uint vertexID [[vertex_id]],
 
     ChunkInfo chunk = chunks[idx.chunkIndex];
 
+    // Bounds check local splat index; protects against transient stale indices.
+    if (idx.splatIndex >= chunk.splatCount) {
+        FragmentIn out;
+        out.position = float4(1, 1, 0, 1);
+        return out;
+    }
+
     if (!chunk.enabled) {
         FragmentIn out;
         out.position = float4(1, 1, 0, 1);
