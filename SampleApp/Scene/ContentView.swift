@@ -85,7 +85,14 @@ struct ContentView: View {
                 }
             }
 
-            Spacer()
+            Button("Procedural Splat") {
+                openWindow(value: ModelIdentifier.proceduralSplat)
+            }
+            .padding()
+            .buttonStyle(.borderedProminent)
+#if os(visionOS)
+            .disabled(immersiveSpaceIsShown)
+#endif
 
             Button("Show Sample Box") {
                 openWindow(value: ModelIdentifier.sampleBox)

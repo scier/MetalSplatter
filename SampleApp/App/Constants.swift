@@ -9,5 +9,12 @@ enum Constants {
     static let fovy = Angle(degrees: 65)
 #endif
     static let modelCenterZ: Float = -8
+
+    // Procedural splat geometry
+    static let proceduralCubeSize: Float = 1.0
+    static let proceduralCubeDistance: Float = 1.0
+    static let proceduralCubeGridSizes: [Int] = [10, 20, 50]
+    static let proceduralCubeSplatRelativeRadius: Float = 0.1
+    static let proceduralCubeSwapDelay: TimeInterval = 2.0
 }
 

@@ -32,6 +32,7 @@ final class VisionSceneRenderer: @unchecked Sendable {
 
     private var model: ModelIdentifier?
     private var modelRenderer: (any ModelRenderer)?
+    private var proceduralSplatController: ProceduralSplatController?
 
     let inFlightSemaphore = DispatchSemaphore(value: Constants.maxSimultaneousRenders)
 
@@ -68,6 +69,7 @@ final class VisionSceneRenderer: @unchecked Sendable {
         self.model = model
 
         modelRenderer = nil
+        proceduralSplatController = nil
         switch model {
         case .gaussianSplat(let url):
             let splat = try SplatRenderer(device: device,
@@ -81,6 +83,16 @@ final class VisionSceneRenderer: @unchecked Sendable {
             let chunk = try SplatChunk(device: device, from: points)
             await splat.addChunk(chunk)
             modelRenderer = splat
+        case .proceduralSplat:
+            let controller = try await ProceduralSplatController(
+                device: device,
+                colorFormat: layerRenderer.configuration.colorFormat,
+                depthFormat: layerRenderer.configuration.depthFormat,
+                sampleCount: 1,
+                maxViewCount: layerRenderer.properties.viewCount,
+                maxSimultaneousRenders: Constants.maxSimultaneousRenders)
+            proceduralSplatController = controller
+            modelRenderer = controller.splatRenderer
         case .sampleBox:
             modelRenderer = try SampleBoxRenderer(device: device,
                                                   colorFormat: layerRenderer.configuration.colorFormat,
@@ -170,6 +182,7 @@ final class VisionSceneRenderer: @unchecked Sendable {
         frame.startSubmission()
 
         updateRotation()
+        proceduralSplatController?.update()
 
         // Use first drawable for timing/anchor calculations
         let primaryDrawable = drawables[0]

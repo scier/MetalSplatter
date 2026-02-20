@@ -24,6 +24,7 @@
 		61791E162B42297B00302B57 /* MetalKitSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61791E142B42294700302B57 /* MetalKitSceneView.swift */; };
 		617E50C92B314C4800F99766 /* PLYIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50C82B314C4800F99766 /* PLYIO */; };
 		617E50CB2B314C4800F99766 /* SplatIO in Frameworks */ = {isa = PBXBuildFile; productRef = 617E50CA2B314C4800F99766 /* SplatIO */; };
+		61E963922F46D321002AD4B5 /* ProceduralSplatController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E963912F46D321002AD4B5 /* ProceduralSplatController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +43,7 @@
 		61791E112B416DCF00302B57 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		61791E142B42294700302B57 /* MetalKitSceneView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetalKitSceneView.swift; sourceTree = "<group>"; };
 		617E50B02B314BE200F99766 /* MetalSplatter SampleApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MetalSplatter SampleApp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		61E963912F46D321002AD4B5 /* ProceduralSplatController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProceduralSplatController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,6 +64,7 @@
 		610347DF2B4689DB00693CE3 /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				61E963912F46D321002AD4B5 /* ProceduralSplatController.swift */,
 				61791DDB2B4154FB00302B57 /* ModelIdentifier.swift */,
 				61791DDE2B4154FB00302B57 /* ModelRenderer.swift */,
 				61791DDC2B4154FB00302B57 /* SampleBoxRenderer+ModelRenderer.swift */,
@@ -212,6 +215,7 @@
 				610347DB2B46875700693CE3 /* VisionSceneRenderer.swift in Sources */,
 				610347D92B46864500693CE3 /* SampleApp.swift in Sources */,
 				61791E102B41688000302B57 /* MetalKitSceneRenderer.swift in Sources */,
+				61E963922F46D321002AD4B5 /* ProceduralSplatController.swift in Sources */,
 				61791DE02B4154FB00302B57 /* SplatRenderer+ModelRenderer.swift in Sources */,
 				61791DE82B4154FB00302B57 /* ModelRenderer.swift in Sources */,
 				61791DCF2B41544300302B57 /* Assets.xcassets in Sources */,
