@@ -26,7 +26,11 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     let inFlightSemaphore = DispatchSemaphore(value: Constants.maxSimultaneousRenders)
 
     var lastRotationUpdateTimestamp: Date? = nil
-    var rotation: Angle = .zero
+    var yaw: Angle = .zero
+    var pitch: Angle = .zero
+    var distance: Float = -Constants.modelCenterZ
+    var panOffset: SIMD2<Float> = .zero
+    var autoRotate: Bool = true
 
     var drawableSize: CGSize = .zero
 
@@ -82,15 +86,24 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    func resetCamera() {
+        yaw = .zero
+        pitch = .zero
+        distance = -Constants.modelCenterZ
+        panOffset = .zero
+    }
+
     private var viewport: ModelRendererViewportDescriptor {
         let projectionMatrix = matrix_perspective_right_hand(fovyRadians: Float(Constants.fovy.radians),
                                                              aspectRatio: Float(drawableSize.width / drawableSize.height),
                                                              nearZ: 0.1,
                                                              farZ: 100.0)
 
-        let rotationMatrix = matrix4x4_rotation(radians: Float(rotation.radians),
-                                                axis: Constants.rotationAxis)
-        let translationMatrix = matrix4x4_translation(0.0, 0.0, Constants.modelCenterZ)
+        let yawMatrix = matrix4x4_rotation(radians: Float(yaw.radians),
+                                           axis: SIMD3<Float>(0, 1, 0))
+        let pitchMatrix = matrix4x4_rotation(radians: Float(pitch.radians),
+                                             axis: SIMD3<Float>(1, 0, 0))
+        let translationMatrix = matrix4x4_translation(panOffset.x, panOffset.y, -distance)
         // Turn common 3D GS PLY files rightside-up. This isn't generally meaningful, it just
         // happens to be a useful default for the most common datasets at the moment.
         let commonUpCalibration = matrix4x4_rotation(radians: .pi, axis: SIMD3<Float>(0, 0, 1))
@@ -99,7 +112,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
 
         return ModelRendererViewportDescriptor(viewport: viewport,
                                                projectionMatrix: projectionMatrix,
-                                               viewMatrix: translationMatrix * rotationMatrix * commonUpCalibration,
+                                               viewMatrix: translationMatrix * pitchMatrix * yawMatrix * commonUpCalibration,
                                                screenSize: SIMD2(x: Int(drawableSize.width), y: Int(drawableSize.height)))
     }
 
@@ -109,8 +122,9 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
             lastRotationUpdateTimestamp = now
         }
 
+        guard autoRotate else { return }
         guard let lastRotationUpdateTimestamp else { return }
-        rotation += Constants.rotationPerSecond * now.timeIntervalSince(lastRotationUpdateTimestamp)
+        yaw += Constants.rotationPerSecond * now.timeIntervalSince(lastRotationUpdateTimestamp)
     }
 
     func draw(in view: MTKView) {

@@ -38,6 +38,7 @@ final class VisionSceneRenderer: @unchecked Sendable {
 
     private var lastRotationUpdateTimestamp: Date? = nil
     private var rotation: Angle = .zero
+    var autoRotate: Bool = true
 
     let arSession: ARKitSession
     let worldTracking: WorldTrackingProvider
@@ -145,6 +146,7 @@ final class VisionSceneRenderer: @unchecked Sendable {
             lastRotationUpdateTimestamp = now
         }
 
+        guard autoRotate else { return }
         guard let lastRotationUpdateTimestamp else { return }
         rotation += Constants.rotationPerSecond * now.timeIntervalSince(lastRotationUpdateTimestamp)
     }
