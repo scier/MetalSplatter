@@ -1,7 +1,10 @@
 import Foundation
+import os
 import PLYIO
 
 public class SplatPLYSceneReader: SplatSceneReader {
+    static let log = Logger(subsystem: "com.SplatIO", category: "SplatPLYSceneReader")
+
     enum Error: LocalizedError {
         case unsupportedFileContents(String?)
         case unexpectedPointCountDiscrepancy
@@ -37,19 +40,37 @@ public class SplatPLYSceneReader: SplatSceneReader {
     }
 
     public func read() async throws -> AsyncThrowingStream<[SplatPoint], Swift.Error> {
+        Self.log.debug("Starting splat PLY read")
         let (header, plyStream) = try await PLYReader(source).read()
 
         let elementMapping = try ElementInputMapping.elementMapping(for: header)
 
-        // TODO SCIER: report expected point count
+        let colorDescription: String
+        switch elementMapping.colorPropertyIndices {
+        case .sphericalHarmonicFloat(let indices):
+            let shDegree = SHDegree.from(coefficientCount: indices.count)
+            colorDescription = "spherical harmonics (degree \(shDegree.rawValue), \(indices.count) coefficient(s))"
+        case .sRGBFloat256:
+            colorDescription = "sRGB float256 (legacy NeRF Studio)"
+        case .sRGBUInt8:
+            colorDescription = "sRGB uint8"
+        }
+
+        let expectedPointCount = header.elements[elementMapping.elementTypeIndex].count
+        Self.log.info("Splat PLY mapping: \(expectedPointCount) expected point(s), color=\(colorDescription, privacy: .public)")
+
         return AsyncThrowingStream { continuation in
             Task {
                 var points = [SplatPoint]()
+                var totalPointCount = 0
+                var skippedSeriesCount = 0
 
                 for try await plyStreamElementSeries in plyStream {
                     var pointCount = 0
                     // Skip non-vertex element types (e.g. face, extrinsic, intrinsic metadata)
                     guard plyStreamElementSeries.typeIndex == elementMapping.elementTypeIndex else {
+                        skippedSeriesCount += 1
+                        Self.log.debug("Skipping non-vertex element series (type index \(plyStreamElementSeries.typeIndex), element \"\(plyStreamElementSeries.elementHeader.name, privacy: .public)\")")
                         continue
                     }
 
@@ -67,14 +88,20 @@ public class SplatPLYSceneReader: SplatSceneReader {
                             pointCount += 1
                         }
                     } catch {
+                        Self.log.error("Splat PLY read error at point \(totalPointCount + pointCount)/\(expectedPointCount): \(error.localizedDescription, privacy: .public)")
                         continuation.finish(throwing: error)
                         return
                     }
 
+                    totalPointCount += pointCount
+                    Self.log.debug("Splat PLY: yielded \(pointCount) point(s) (\(totalPointCount)/\(expectedPointCount) total)")
                     continuation.yield(Array(points.prefix(pointCount)))
                 }
-                
-                // TODO SCIER: validate expected point count
+
+                if totalPointCount != expectedPointCount {
+                    Self.log.warning("Splat PLY: expected \(expectedPointCount) point(s) but decoded \(totalPointCount)")
+                }
+                Self.log.info("Splat PLY read complete: \(totalPointCount) point(s) decoded\(skippedSeriesCount > 0 ? ", \(skippedSeriesCount) non-vertex series skipped" : "", privacy: .public)")
                 continuation.finish()
             }
         }
