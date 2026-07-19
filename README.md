@@ -36,5 +36,6 @@ You're right, the documentation is entirely missing; it's a major TODO list item
 * Looking for 3DGS files? Here are a few suggestions:
    * Capture your own by using a camera or drone, then use [Nerfstudio](https://docs.nerf.studio/nerfology/methods/splat.html) to train the splat
    * Use the [scene data from the original paper](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/)
+   * Find ready-made PLY and SPZ scenes on [SplatMart](https://www.splatmart.com)
 * [RadianceFields.com](https://radiancefields.com) is a great source to track news and articles about 3DGS, NeRFs, and related technology and tools (for instance [news about MetalSplatter](https://radiancefields.com/platforms/metalsplatter])), and the community surrounding it
 * [MrNeRF's Awesome 3D Gaussian Splatting Resources](https://github.com/MrNeRF/awesome-3D-gaussian-splatting) is exactly what it says on the label - in particular, an exhaustive and frequently-updated list of 3DGS-related research
