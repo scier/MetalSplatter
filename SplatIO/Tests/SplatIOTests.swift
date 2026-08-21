@@ -368,6 +368,66 @@ final class SplatIOTests: XCTestCase {
 
         _ = try await reader.read()
     }
+
+    // MARK: - Variable spherical harmonics degrees (PLY)
+
+    /// A synthetic 3DGS ("INRIA-layout") binary PLY: x/y/z, normals, f_dc_0..2,
+    /// f_rest_0..(restCount-1), opacity, scale_0..2, rot_0..3 — all float32.
+    /// Point i sits at (i, i+0.25, i+0.5); f_rest_k carries 100+k so the
+    /// channel-to-interleaved reorganization is observable.
+    private func syntheticGaussianSplatPLY(restCount: Int, pointCount: Int) -> Data {
+        let propertyNames = ["x", "y", "z", "nx", "ny", "nz", "f_dc_0", "f_dc_1", "f_dc_2"]
+            + (0..<restCount).map { "f_rest_\($0)" }
+            + ["opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"]
+        var data = Data((["ply", "format binary_little_endian 1.0", "element vertex \(pointCount)"]
+            + propertyNames.map { "property float \($0)" }
+            + ["end_header", ""]).joined(separator: "\n").utf8)
+        for i in 0..<pointCount {
+            let row: [Float] = [Float(i), Float(i) + 0.25, Float(i) + 0.5, 0, 0, 0, 1, 2, 3]
+                + (0..<restCount).map { Float(100 + $0) }
+                + [0, -2, -2, -2, 1, 0, 0, 0]
+            for value in row {
+                withUnsafeBytes(of: value.bitPattern.littleEndian) { data.append(contentsOf: $0) }
+            }
+        }
+        return data
+    }
+
+    func testReadPLYWithAnySHDegree() async throws {
+        // 3DGS exports carry 0 (SH0), 9 (SH1), 24 (SH2), or 45 (SH3) f_rest_*
+        // properties; the reader must accept the run that actually exists.
+        for restCount in [0, 9, 24, 45] {
+            let coeffsPerChannel = restCount / 3
+            let reader = try SplatPLYSceneReader(syntheticGaussianSplatPLY(restCount: restCount, pointCount: 3))
+            let content = try await ContentStorage(reader)
+            XCTAssertEqual(content.points.count, 3, "restCount=\(restCount)")
+            for (i, point) in content.points.enumerated() {
+                XCTAssertEqual(point.position, SIMD3(Float(i), Float(i) + 0.25, Float(i) + 0.5))
+                let sh = point.color.asSphericalHarmonicFloat
+                XCTAssertEqual(sh.count, 1 + coeffsPerChannel, "restCount=\(restCount)")
+                XCTAssertEqual(sh[0], SIMD3<Float>(1, 2, 3))
+                // f_rest_k was written channel-by-channel as 100+k, so interleaved
+                // coefficient c reads back as (100+c-1, +coeffsPerChannel, +2*coeffsPerChannel)
+                for c in 1..<sh.count {
+                    XCTAssertEqual(sh[c], SIMD3(Float(100 + c - 1),
+                                                Float(100 + c - 1 + coeffsPerChannel),
+                                                Float(100 + c - 1 + 2 * coeffsPerChannel)),
+                                   "restCount=\(restCount) coefficient \(c)")
+                }
+            }
+        }
+    }
+
+    func testReadPLYRejectsPartialSHChannels() async throws {
+        // 10 f_rest_* properties is not a whole number of RGB channels
+        let reader = try SplatPLYSceneReader(syntheticGaussianSplatPLY(restCount: 10, pointCount: 1))
+        do {
+            _ = try await ContentStorage(reader)
+            XCTFail("Expected unsupportedFileContents for a non-multiple-of-3 f_rest_* count")
+        } catch SplatPLYSceneReader.Error.unsupportedFileContents {
+            // Expected
+        }
+    }
 }
 
 /// Tolerance values for comparing SplatPoints
