@@ -28,7 +28,8 @@ final class ProceduralSplatController: @unchecked Sendable {
          depthFormat: MTLPixelFormat,
          sampleCount: Int,
          maxViewCount: Int,
-         maxSimultaneousRenders: Int) async throws {
+         maxSimultaneousRenders: Int,
+         isolation: isolated (any Actor)? = #isolation) async throws {
         splatRenderer = try SplatRenderer(device: device,
                                           colorFormat: colorFormat,
                                           depthFormat: depthFormat,
