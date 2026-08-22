@@ -23,7 +23,7 @@ extension LayerRenderer.Clock.Instant.Duration {
 /// - State changes are synchronized through the RendererTaskExecutor
 final class VisionSceneRenderer: @unchecked Sendable {
     private static let log =
-        Logger(subsystem: Bundle.main.bundleIdentifier!,
+        Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.metalsplatter.sampleapp",
                category: "VisionSceneRenderer")
 
     let layerRenderer: LayerRenderer
