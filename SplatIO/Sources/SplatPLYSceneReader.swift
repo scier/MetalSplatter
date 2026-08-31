@@ -121,8 +121,12 @@ private struct ElementInputMapping {
            let sh0_bPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_b) {
             let primaryColorPropertyIndices = SIMD3<Int>(x: sh0_rPropertyIndex, y: sh0_gPropertyIndex, z: sh0_bPropertyIndex)
             if headerElement.hasProperty(forName: "\(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)0") {
-                let individualSphericalHarmonicsPropertyIndices: [Int] = try (0..<sphericalHarmonicsCount).map {
-                    try headerElement.index(forFloat32PropertyNamed: [ "\(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)\($0)" ])
+                var individualSphericalHarmonicsPropertyIndices: [Int] = []
+                for index in 0..<sphericalHarmonicsCount {
+                    guard let propertyIndex = try? headerElement.index(forFloat32PropertyNamed: [ "\(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)\(index)" ]) else {
+                        break
+                    }
+                    individualSphericalHarmonicsPropertyIndices.append(propertyIndex)
                 }
                 // PLY files store SH coefficients channel-by-channel (all R, then all G, then all B),
                 // but we need them RGB-interleaved. Reorganize the indices accordingly.
