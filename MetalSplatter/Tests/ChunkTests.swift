@@ -1,6 +1,7 @@
 import XCTest
 import Metal
 import simd
+import SplatIO
 @testable import MetalSplatter
 
 final class ChunkTests: XCTestCase {
@@ -54,6 +55,39 @@ final class ChunkTests: XCTestCase {
         let chunk = SplatChunk(splats: buffer)
 
         XCTAssertEqual(chunk.splatCount, 5)
+    }
+
+    func testSplatChunkFromPointsClampsSHCoefficientsToDegree() throws {
+        // SplatChunk sizes its SH buffer from the (rounded-up) degree of the first point. A point
+        // carrying more coefficients than that degree must not write past its own slot, and one
+        // carrying fewer must leave the remainder zero.
+        func point(coefficientCount: Int, base: Float) -> SplatPoint {
+            SplatPoint(position: .zero,
+                       color: .sphericalHarmonicFloat((0..<coefficientCount).map { SIMD3<Float>(repeating: base + Float($0)) }),
+                       opacity: .linearFloat(1),
+                       scale: .linearFloat(SIMD3<Float>(repeating: 0.1)),
+                       rotation: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1))
+        }
+
+        // 17 triplets (16 higher-order) rounds to SH3, which has room for 15 x 3 = 45 per splat
+        let overfull = try SplatChunk(device: device, from: [point(coefficientCount: 17, base: 1000),
+                                                             point(coefficientCount: 17, base: 2000)])
+        XCTAssertEqual(overfull.shDegree, .sh3)
+        let overfullSH = try XCTUnwrap(overfull.shCoefficients)
+        XCTAssertEqual(overfullSH.count, 2 * 45)
+        XCTAssertEqual(Float(overfullSH.values[0]), 1001, "first splat, coefficient 1")
+        XCTAssertEqual(Float(overfullSH.values[44]), 1015, "first splat, coefficient 15 (last that fits)")
+        XCTAssertEqual(Float(overfullSH.values[45]), 2001, "second splat's slot starts with its own coefficient 1")
+        XCTAssertEqual(Float(overfullSH.values[89]), 2015, "second splat, coefficient 15")
+
+        // 3 triplets (2 higher-order) rounds to SH1, which has room for 3 x 3 = 9 per splat
+        let underfull = try SplatChunk(device: device, from: [point(coefficientCount: 3, base: 100)])
+        XCTAssertEqual(underfull.shDegree, .sh1)
+        let underfullSH = try XCTUnwrap(underfull.shCoefficients)
+        XCTAssertEqual(underfullSH.count, 9)
+        XCTAssertEqual(Float(underfullSH.values[5]), 102, "coefficient 2, blue channel")
+        XCTAssertEqual(Float(underfullSH.values[6]), 0, "missing coefficient 3 stays zero")
+        XCTAssertEqual(Float(underfullSH.values[8]), 0, "missing coefficient 3 stays zero")
     }
 
     // MARK: - ChunkedSplatIndex Tests

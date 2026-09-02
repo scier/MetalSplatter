@@ -118,32 +118,41 @@ private struct ElementInputMapping {
            let sh0_gPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_g),
            let sh0_bPropertyIndex = try headerElement.index(forOptionalFloat32PropertyNamed: SplatPLYConstants.PropertyName.sh0_b) {
             let primaryColorPropertyIndices = SIMD3<Int>(x: sh0_rPropertyIndex, y: sh0_gPropertyIndex, z: sh0_bPropertyIndex)
-            if headerElement.hasProperty(forName: "\(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)0") {
-                // Not every 3DGS export is SH degree 3: lower-degree files declare 9 (SH1)
-                // or 24 (SH2) f_rest_* properties. Collect the consecutive f_rest_0..N-1 run
-                // that actually exists rather than demanding all 45; everything downstream
-                // already handles variable degrees.
-                var individualSphericalHarmonicsPropertyIndices: [Int] = []
-                while let index = try headerElement.index(forOptionalFloat32PropertyNamed: [ "\(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)\(individualSphericalHarmonicsPropertyIndices.count)" ]) {
-                    individualSphericalHarmonicsPropertyIndices.append(index)
-                }
-                guard individualSphericalHarmonicsPropertyIndices.count.isMultiple(of: 3) else {
-                    throw SplatPLYSceneReader.Error.unsupportedFileContents("Expected a whole number of RGB channels of \(SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix)* properties; found \(individualSphericalHarmonicsPropertyIndices.count)")
-                }
-                // PLY files store SH coefficients channel-by-channel (all R, then all G, then all B),
-                // but we need them RGB-interleaved. Reorganize the indices accordingly.
-                // For example, for 45 f_rest properties: R=0-14, G=15-29, B=30-44
-                // Coefficient i maps to: (R[i], G[i], B[i]) = (i, i+15, i+30)
-                let coeffsPerChannel = individualSphericalHarmonicsPropertyIndices.count / 3
-                let sphericalHarmonicsPropertyIndices: [SIMD3<Int>] = (0..<coeffsPerChannel).map { i in
-                    SIMD3<Int>(individualSphericalHarmonicsPropertyIndices[i],
-                               individualSphericalHarmonicsPropertyIndices[i + coeffsPerChannel],
-                               individualSphericalHarmonicsPropertyIndices[i + 2 * coeffsPerChannel])
-                }
-                color = .sphericalHarmonicFloat([primaryColorPropertyIndices] + sphericalHarmonicsPropertyIndices)
-            } else {
-                color = .sphericalHarmonicFloat([primaryColorPropertyIndices])
+
+            // Not every 3DGS export is SH degree 3: files declare 0 (SH0), 9 (SH1), 24 (SH2), or
+            // 45 (SH3) f_rest_* properties. Collect the consecutive f_rest_0..N-1 run that exists.
+            let sphericalHarmonicsPrefix = SplatPLYConstants.PropertyName.sphericalHarmonicsPrefix
+            var individualSphericalHarmonicsPropertyIndices: [Int] = []
+            while let index = try headerElement.index(forOptionalFloat32PropertyNamed: [ "\(sphericalHarmonicsPrefix)\(individualSphericalHarmonicsPropertyIndices.count)" ]) {
+                individualSphericalHarmonicsPropertyIndices.append(index)
             }
+
+            // Every f_rest_* property must belong to that run. A gap in the numbering, or extra
+            // properties past the run, is a layout we can't interpret; silently truncating would
+            // mis-assign the channel-major coefficients below.
+            let declaredSphericalHarmonicsCount = headerElement.properties.filter { $0.name.hasPrefix(sphericalHarmonicsPrefix) }.count
+            guard declaredSphericalHarmonicsCount == individualSphericalHarmonicsPropertyIndices.count else {
+                throw SplatPLYSceneReader.Error.unsupportedFileContents("Found \(declaredSphericalHarmonicsCount) \(sphericalHarmonicsPrefix)* properties, but only \(individualSphericalHarmonicsPropertyIndices.count) are numbered consecutively from \(sphericalHarmonicsPrefix)0")
+            }
+
+            // The run must be exactly the layout of some SH degree: downstream consumers
+            // (SplatChunk, the SPZ and PLY writers) size their storage from the degree.
+            guard individualSphericalHarmonicsPropertyIndices.count.isMultiple(of: 3),
+                  let sphericalHarmonicsDegree = SHDegree(coefficientCount: individualSphericalHarmonicsPropertyIndices.count / 3 + 1) else {
+                throw SplatPLYSceneReader.Error.unsupportedFileContents("Expected 0, 9, 24, or 45 \(sphericalHarmonicsPrefix)* properties (spherical harmonics degree 0-3); found \(individualSphericalHarmonicsPropertyIndices.count)")
+            }
+
+            // PLY files store SH coefficients channel-by-channel (all R, then all G, then all B),
+            // but we need them RGB-interleaved. Reorganize the indices accordingly.
+            // For example, for 45 f_rest properties: R=0-14, G=15-29, B=30-44
+            // Coefficient i maps to: (R[i], G[i], B[i]) = (i, i+15, i+30)
+            let coeffsPerChannel = sphericalHarmonicsDegree.extraCoefficientCount
+            let sphericalHarmonicsPropertyIndices: [SIMD3<Int>] = (0..<coeffsPerChannel).map { i in
+                SIMD3<Int>(individualSphericalHarmonicsPropertyIndices[i],
+                           individualSphericalHarmonicsPropertyIndices[i + coeffsPerChannel],
+                           individualSphericalHarmonicsPropertyIndices[i + 2 * coeffsPerChannel])
+            }
+            color = .sphericalHarmonicFloat([primaryColorPropertyIndices] + sphericalHarmonicsPropertyIndices)
         } else if headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorR, type: .float32) &&
                     headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorG, type: .float32) &&
                     headerElement.hasProperty(forName: SplatPLYConstants.PropertyName.colorB, type: .float32) {

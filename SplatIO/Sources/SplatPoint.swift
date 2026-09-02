@@ -25,7 +25,20 @@ public enum SHDegree: UInt8, Sendable, Comparable {
         coefficientCount - 1
     }
 
-    /// Detect SH degree from coefficient count
+    /// The degree whose layout has exactly `coefficientCount` RGB coefficient triplets
+    /// (1, 4, 9, or 16, counting the SH0 term), or nil for any other count.
+    /// Use this to validate input; use `from(coefficientCount:)` to round a count up to a degree.
+    public init?(coefficientCount: Int) {
+        switch coefficientCount {
+        case 1: self = .sh0
+        case 4: self = .sh1
+        case 9: self = .sh2
+        case 16: self = .sh3
+        default: return nil
+        }
+    }
+
+    /// Detect SH degree from coefficient count, rounding up to the next degree
     public static func from(coefficientCount: Int) -> SHDegree {
         switch coefficientCount {
         case 0...1: return .sh0

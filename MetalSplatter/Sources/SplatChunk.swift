@@ -71,11 +71,13 @@ public struct SplatChunk: @unchecked Sendable {
             let shBuffer = try MetalBuffer<Float16>(device: device, capacity: totalCoeffs)
             shBuffer.count = totalCoeffs
 
-            // Copy SH coefficients to buffer
+            // Copy SH coefficients to buffer. A point whose coefficient count doesn't match the
+            // chunk's degree must not write past its own slot: extra coefficients are dropped,
+            // and missing ones stay zero (makeBuffer(length:options:) zero-fills).
             for (i, point) in points.enumerated() {
                 let higherOrderCoeffs = point.color.higherOrderSHCoefficients
                 let offset = i * coeffsPerSplat
-                for (j, coeff) in higherOrderCoeffs.enumerated() {
+                for (j, coeff) in higherOrderCoeffs.prefix(coeffsPerSplat).enumerated() {
                     shBuffer.values[offset + j] = Float16(coeff)
                 }
             }
