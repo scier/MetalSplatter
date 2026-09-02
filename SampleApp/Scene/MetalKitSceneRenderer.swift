@@ -12,7 +12,7 @@ import SwiftUI
 @MainActor
 class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
     private static let log =
-        Logger(subsystem: Bundle.main.bundleIdentifier!,
+        Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.metalsplatter.sampleapp",
                category: "MetalKitSceneRenderer")
 
     let metalKitView: MTKView
@@ -125,7 +125,7 @@ class MetalKitSceneRenderer: NSObject, MTKViewDelegate {
         }
 
         let semaphore = inFlightSemaphore
-        commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
+        commandBuffer.addCompletedHandler { @Sendable _ in
             semaphore.signal()
         }
 
