@@ -82,6 +82,7 @@ class SplatSorter: @unchecked Sendable {
 
     private static var bufferCount: Int { 3 }
     private static var pollIntervalNanoseconds: UInt64 { 1_000_000 } // 1ms
+    private static var cameraPoseEpsilonSquared: Float { 0.000001 }
 
     // MARK: - Types
 
@@ -115,6 +116,19 @@ class SplatSorter: @unchecked Sendable {
     struct CameraPose: Equatable {
         var position: SIMD3<Float>
         var forward: SIMD3<Float>
+
+        func requiresSort(comparedTo other: CameraPose) -> Bool {
+            if (position - other.position).lengthSquared > SplatSorter.cameraPoseEpsilonSquared {
+                return true
+            }
+
+            if !SplatRenderer.Constants.sortByDistance,
+               (forward - other.forward).lengthSquared > SplatSorter.cameraPoseEpsilonSquared {
+                return true
+            }
+
+            return false
+        }
     }
 
     // MARK: - State
@@ -164,6 +178,10 @@ class SplatSorter: @unchecked Sendable {
         state.withLock { state in
             state.chunks.reduce(0) { $0 + $1.buffer.count }
         }
+    }
+
+    var isSortLoopRunningForTesting: Bool {
+        state.withLock { $0.sortLoopRunning }
     }
 
     /// Sets the chunks to sort. Must be called within `withExclusiveAccess` for thread safety,
@@ -322,11 +340,18 @@ class SplatSorter: @unchecked Sendable {
 
     /// Updates the camera pose, triggering a new sort if needed.
     func updateCameraPose(position: SIMD3<Float>, forward: SIMD3<Float>) {
-        state.withLock { state in
-            state.cameraPose = CameraPose(position: position, forward: forward)
+        let shouldSort = state.withLock { state -> Bool in
+            let cameraPose = CameraPose(position: position, forward: forward)
+            guard cameraPose.requiresSort(comparedTo: state.cameraPose) else {
+                return false
+            }
+            state.cameraPose = cameraPose
             state.needsSort = true
+            return true
         }
-        ensureSortLoopRunning()
+        if shouldSort {
+            ensureSortLoopRunning()
+        }
     }
 
     // MARK: - Index Buffer Access (Scoped - Preferred)
@@ -399,12 +424,16 @@ class SplatSorter: @unchecked Sendable {
     /// Use this when chunk contents have been reordered in place.
     /// Any unreleased references become stale - callers should release them promptly.
     func invalidateAllBuffers() {
-        state.withLock { state in
+        let shouldSort = state.withLock { state -> Bool in
             for i in 0..<state.indexBuffers.count {
                 state.indexBuffers[i].isValid = false
             }
             state.mostRecentValidBufferIndex = nil
-            state.needsSort = true
+            state.needsSort = !state.chunks.isEmpty
+            return state.needsSort
+        }
+        if shouldSort {
+            ensureSortLoopRunning()
         }
     }
 
@@ -555,7 +584,7 @@ class SplatSorter: @unchecked Sendable {
             guard let params = sortParams else {
                 // Nothing to sort or no buffer available, check if we should exit or wait
                 let shouldExit = state.withLock { state -> Bool in
-                    !state.needsSort && state.chunks.isEmpty
+                    !state.hasExclusiveAccess && !state.needsSort
                 }
 
                 if shouldExit {

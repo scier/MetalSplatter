@@ -1,4 +1,6 @@
 import XCTest
+import Dispatch
+import Synchronization
 import Metal
 import simd
 @testable import MetalSplatter
@@ -325,6 +327,68 @@ final class SplatSorterTests: XCTestCase {
         }
     }
 
+    func testSortLoopStopsAfterSettledSortWithChunksLoaded() async throws {
+        let sorter = try SplatSorter(device: device)
+        let chunk = try makeChunkReference(positions: [
+            SIMD3<Float>(0, 0, -5),
+            SIMD3<Float>(0, 0, -2),
+            SIMD3<Float>(0, 0, -8),
+        ], chunkIndex: 0)
+
+        sorter.setChunks([chunk])
+        sorter.updateCameraPose(position: SIMD3<Float>(0, 0, 0),
+                                forward: SIMD3<Float>(0, 0, -1))
+
+        let buffer = await withTimeout(seconds: 2) {
+            await sorter.obtainSortedIndices()
+        }
+        XCTAssertNotNil(buffer, "Initial sort should complete")
+        if let buffer {
+            sorter.releaseSortedIndices(buffer)
+        }
+
+        let didStop = await waitForSortLoopToStop(sorter)
+
+        XCTAssertEqual(didStop, true, "Sort loop should stop when the settled scene has no pending sort")
+    }
+
+    func testTinyCameraPoseUpdateDoesNotTriggerResort() async throws {
+        let sorter = try SplatSorter(device: device)
+        let sortStartCount = Mutex(0)
+        sorter.onSortStart = {
+            sortStartCount.withLock { $0 += 1 }
+        }
+
+        let chunk = try makeChunkReference(positions: [
+            SIMD3<Float>(0, 0, -5),
+            SIMD3<Float>(0, 0, -2),
+            SIMD3<Float>(0, 0, -8),
+        ], chunkIndex: 0)
+
+        sorter.setChunks([chunk])
+        sorter.updateCameraPose(position: SIMD3<Float>(0, 0, 0),
+                                forward: SIMD3<Float>(0, 0, -1))
+
+        let buffer = await withTimeout(seconds: 2) {
+            await sorter.obtainSortedIndices()
+        }
+        XCTAssertNotNil(buffer, "Initial sort should complete")
+        if let buffer {
+            sorter.releaseSortedIndices(buffer)
+        }
+
+        _ = await waitForSortLoopToStop(sorter)
+
+        XCTAssertEqual(sortStartCount.withLock { $0 }, 1)
+
+        sorter.updateCameraPose(position: SIMD3<Float>(0.0001, 0, 0),
+                                forward: SIMD3<Float>(0, 0.0001, -1))
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(sortStartCount.withLock { $0 }, 1, "Tiny camera pose changes should not trigger a new sort")
+    }
+
     // MARK: - Edge Cases
 
     func testEmptyChunks() async throws {
@@ -409,6 +473,18 @@ final class SplatSorterTests: XCTestCase {
 // MARK: - Test Helpers
 
 extension SplatSorterTests {
+    func waitForSortLoopToStop(_ sorter: SplatSorter,
+                               timeoutNanoseconds: UInt64 = 2_000_000_000) async -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+        while sorter.isSortLoopRunningForTesting {
+            if DispatchTime.now().uptimeNanoseconds >= deadline {
+                return false
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        return true
+    }
+
     func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async -> T?) async -> T? {
         await withTaskGroup(of: T?.self) { group in
             group.addTask {
