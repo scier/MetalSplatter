@@ -103,12 +103,21 @@ vertex FragmentIn postprocessVertexShader(uint vertexID [[vertex_id]]) {
 }
 
 fragment FragmentOut postprocessFragmentShader(FragmentValues fragmentValues [[imageblock_data]]) {
+    // Pixels this renderer didn't touch must not write color OR depth, so that
+    // framebuffer content loaded via loadAction == .load (e.g. an earlier renderer's
+    // output this frame) is preserved for compositing and reprojection.
+    if (fragmentValues.color.a == 0) {
+        discard_fragment();
+    }
     FragmentOut out;
-    out.depth = (fragmentValues.color.a == 0) ? 0 : fragmentValues.depth / fragmentValues.color.a;
+    out.depth = fragmentValues.depth / fragmentValues.color.a;
     out.color = fragmentValues.color;
     return out;
 }
 
 fragment half4 postprocessFragmentShaderNoDepth(FragmentValues fragmentValues [[imageblock_data]]) {
+    if (fragmentValues.color.a == 0) {
+        discard_fragment();
+    }
     return fragmentValues.color;
 }
