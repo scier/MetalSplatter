@@ -45,6 +45,26 @@ public final class SplatRenderer: @unchecked Sendable {
         }
     }
 
+    /// Optional GPU timestamp sampling for the render pass encoded by `render(...)`.
+    ///
+    /// The caller owns the counter sample buffer and chooses the two sample indices. MetalSplatter only
+    /// attaches them to its render pass, so the splat draw can be timed on its own, apart from other passes
+    /// in the same command buffer. Resolve the samples after the command buffer has completed. They are
+    /// only written when `render(...)` returns `true`.
+    public struct RenderStageCounterSampling {
+        public var sampleBuffer: MTLCounterSampleBuffer
+        public var startOfVertexSampleIndex: Int
+        public var endOfFragmentSampleIndex: Int
+
+        public init(sampleBuffer: MTLCounterSampleBuffer,
+                    startOfVertexSampleIndex: Int,
+                    endOfFragmentSampleIndex: Int) {
+            self.sampleBuffer = sampleBuffer
+            self.startOfVertexSampleIndex = startOfVertexSampleIndex
+            self.endOfFragmentSampleIndex = endOfFragmentSampleIndex
+        }
+    }
+
     // Keep in sync with Shaders.metal : BufferIndex
     enum BufferIndex: NSInteger {
         case uniforms    = 0
@@ -705,6 +725,7 @@ public final class SplatRenderer: @unchecked Sendable {
                        depthTexture: MTLTexture?,
                        rasterizationRateMap: MTLRasterizationRateMap?,
                        renderTargetArrayLength: Int,
+                       counterSampling: RenderStageCounterSampling?,
                        for commandBuffer: MTLCommandBuffer) -> MTLRenderCommandEncoder {
         let renderPassDescriptor = MTLRenderPassDescriptor()
         renderPassDescriptor.colorAttachments[0].texture = colorTexture
@@ -729,6 +750,17 @@ public final class SplatRenderer: @unchecked Sendable {
             } else {
                 Self.log.error("initializePipeline == nil in renderEncoder()")
             }
+        }
+
+        if let counterSampling {
+            // Start of the vertex stage and end of the fragment stage bracket the whole pass,
+            // including the tile stages of the multi-stage pipeline
+            let sampleAttachment = renderPassDescriptor.sampleBufferAttachments[0]!
+            sampleAttachment.sampleBuffer = counterSampling.sampleBuffer
+            sampleAttachment.startOfVertexSampleIndex = counterSampling.startOfVertexSampleIndex
+            sampleAttachment.endOfVertexSampleIndex = MTLCounterDontSample
+            sampleAttachment.startOfFragmentSampleIndex = MTLCounterDontSample
+            sampleAttachment.endOfFragmentSampleIndex = counterSampling.endOfFragmentSampleIndex
         }
 
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
@@ -761,6 +793,7 @@ public final class SplatRenderer: @unchecked Sendable {
     ///   - renderTargetArrayLength: The render target array length (for layered rendering)
     ///   - accessTimeout: Maximum time to block waiting for render access (when exclusive chunk access is held, or when maxSimultaneousRenders are already in flight). Defaults to 0.1s.
     ///   - sortTimeout: Maximum time to block the caller in order to wait for a valid sorted index buffer to be available. This does not cause the method to wait for the latest sort to complete, it only causes it to block if no sort at all has completed since the last time the sort was invalidated (e.g. if chunks were changed). Passing 0 disables blocking, but may result in a flash after a chunk update instead of a dropped frame. Defaults to blocking 0.1s.
+    ///   - counterSampling: Optional GPU timestamp sampling for this render pass. See `RenderStageCounterSampling`. Defaults to `nil`.
     ///   - commandBuffer: The command buffer to encode rendering commands into
     /// - Returns: `true` if rendering was performed, `false` if rendering was skipped (e.g., due to exclusive access timeout or no splats). When `false` is returned, the caller should drop the frame rather than presenting an incomplete render.
     @discardableResult
@@ -772,6 +805,7 @@ public final class SplatRenderer: @unchecked Sendable {
                        renderTargetArrayLength: Int,
                        accessTimeout: TimeInterval = 0.1,
                        sortTimeout: TimeInterval = 0.1,
+                       counterSampling: RenderStageCounterSampling? = nil,
                        to commandBuffer: MTLCommandBuffer) throws -> Bool {
         // Try to acquire render access, respecting exclusive access, serial render, and maxSimultaneousRenders
         let deadline = Date().addingTimeInterval(accessTimeout)
@@ -879,6 +913,7 @@ public final class SplatRenderer: @unchecked Sendable {
                                           depthTexture: depthTexture,
                                           rasterizationRateMap: rasterizationRateMap,
                                           renderTargetArrayLength: renderTargetArrayLength,
+                                          counterSampling: counterSampling,
                                           for: commandBuffer)
 
         let triangleVertexCount = indexedSplatCount * 6
